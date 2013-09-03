@@ -600,6 +600,16 @@
           </script>
 
           <script id="bucket_settings_template" type="text/html">
+            <div class="gong_rb warmup_stats">
+              <h2>Warm-up Progress</h2>
+              <label class="for-hdd-quota">
+                <span>State/Stage the warm-up thread is in:</span>
+                <span>reading access logs</span><br>
+                <span>Approximate time in (hh:mm:ss) to completion:</span>
+                <span>00:32:32</span>
+              </label>
+            </div>
+
             <div class="gong_rb">
               <div class="pad">
                 <div>
@@ -639,7 +649,7 @@
                 <span>{%= h(V.formatQuantity(ramQuota)) %}</span>
                 <abbr></abbr>
               </label>
-
+ 
             {% if (storageInfoRelevant) { %}
               <h2>Storage Size</h2>
               <label class="for-hdd-quota">
