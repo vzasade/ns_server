@@ -600,14 +600,20 @@
           </script>
 
           <script id="bucket_settings_template" type="text/html">
-            <div class="gong_rb warmup_stats">
-              <h2>Warm-up Progress</h2>
-              <label class="for-hdd-quota">
-                <span>State/Stage the warm-up thread is in:</span>
-                <span>reading access logs</span><br>
-                <span>Approximate time in (hh:mm:ss) to completion:</span>
-                <span>00:32:32</span>
-              </label>
+            <div class="gong_rb warmup_stats" style="{%= thisBucketWarmupTask ? '' : 'display: none' %}">
+              <div class="pad">
+                <h2>Warm-up Progress</h2>
+                <label>
+                  <span>State/Stage the warm-up thread is in:</span>
+                  <span>{%= thisBucketWarmupTask ? thisBucketWarmupTask.stats.ep_warmup_state : "none" %}</span><br>
+                  <span>Approximate time in (hh:mm:ss) to completion:</span>
+                  <span>00:32:32</span>
+                </label>
+              </div>
+              <div class="side side_1"></div>
+              <div class="side side_2"></div>
+              <div class="side side_3"></div>
+              <div class="side side_4"></div>
             </div>
 
             <div class="gong_rb">

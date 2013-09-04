@@ -724,6 +724,13 @@ var BucketsSection = {
         var rawBucketDetails = Cell.compute(function (v) {
           return future.get({url: bucketInfo.uri + "&basic_stats=true"});
         });
+        var maybeBucketWarmupTaskCell = Cell.compute(function (v) {
+          var progresses = v.need(DAL.cells.tasksProgressCell);
+          return _.find(progresses, function (task) {
+            return task.type === 'warming_up' && task.bucket === bucketName;
+          }) || null;
+        });
+        maybeBucketWarmupTaskCell.equality = _.isEqual;
         var rv = Cell.compute(function (v) {
           var thisBucketCompactionTask = v.need(maybeBucketCompactionTaskCell);
           var recentlyCompacted = v.need(compactionWasStartedCell);
@@ -744,6 +751,8 @@ var BucketsSection = {
           if (data.bucketType !== 'membase') {
             data.noCompaction = true;
           }
+
+          data.thisBucketWarmupTask = v.need(maybeBucketWarmupTaskCell);
           return data;
         });
         rv.delegateInvalidationMethods(rawBucketDetails);

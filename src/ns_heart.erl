@@ -362,9 +362,10 @@ grab_warmup_task(Bucket) ->
         [] ->
             [];
         _ ->
-            [[{type, warmingUp},
-             {bucket, list_to_binary(Bucket)},
-             {stats, Stats}]]
+            [[{type, warming_up},
+              {bucket, list_to_binary(Bucket)},
+              {recommendedRefreshPeriod, 2.0},
+              {stats, Stats}]]
     end.
 
 grab_warmup_tasks() ->
