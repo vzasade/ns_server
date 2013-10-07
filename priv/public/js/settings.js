@@ -18,7 +18,7 @@ var SettingsSection = {
     this.tabs = new TabsCell('settingsTabs',
                              '#js_settings .tabs',
                              '#js_settings .panes > div',
-                             ['update_notifications', 'auto_failover',
+                             ['cluster','update_notifications', 'auto_failover',
                               'email_alerts', 'settings_compaction',
                               'settings_sample_buckets', 'account_management']);
 
@@ -34,6 +34,7 @@ var SettingsSection = {
 
     }, DAL.cells.isROAdminCell, DAL.cells.runningInCompatMode);
 
+    ClusterSection.init();
     UpdatesNotificationsSection.init();
     AutoFailoverSection.init();
     EmailAlertsSection.init();
@@ -72,6 +73,55 @@ var SettingsSection = {
         rootNode.find('.save_button').attr('disabled', 'disabled');
       }
     }
+  }
+};
+
+var ClusterSection = {
+  init: function () {
+    var self = this;
+    DAL.cells.currentPoolDetailsCell.getValue(function(pool) {
+      var storage = pool.storageTotals;
+      var data = {
+        totalRAMMegs: Math.floor(storage.ram.total/Math.Mi),
+        quota: Math.floor(storage.ram.quotaTotal/Math.Mi)
+      };
+      renderTemplate('cluster', data, $i('cluster_settings_container'));
+    });
+
+    $('#cluster_settings_container')
+      .delegate('input', 'keyup', function() {
+        self.validate(self.getParams());
+      }).delegate('.save_button', 'click', function() {
+        var button = this;
+        $.ajax({
+          url: "/pools/default",
+          type: 'POST',
+          data: self.getParams(),
+          success: function() {
+            $(button).attr('disabled', 'disabled');
+          },
+          error: function(jqXhr) {
+            var val = JSON.parse(jqXhr.responseText);
+            SettingsSection.renderErrors(val, $('#cluster_settings_container'));
+          }
+        });
+      });
+  },
+  getParams: function() {
+    return {
+      memoryQuota: $('#cluster_settings_ram_quota').val()
+    }
+  },
+  validate: function(data) {
+    $.ajax({
+      url: "/pools/default?just_validate=1",
+      type: 'POST',
+      data: data,
+      complete: function(jqXhr) {
+        var val = JSON.parse(jqXhr.responseText);
+        SettingsSection.renderErrors(val, $('#cluster_settings_container'));
+      }
+    });
   }
 };
 

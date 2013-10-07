@@ -392,6 +392,9 @@ p.info {padding:5px 24px 15px;font-weight:bold;}
 
 .settings legend {font-size:14px;font-weight:bold;margin-left:16px}
 
+/* cluster settings styles */
+#cluster_settings_container label, #cluster_settings_container p {line-height:1.4;margin:1em 0;padding:0 10px}
+
 /* update notification styles */
 #notifications_container .item {padding:13px;}
 #notifications_container .save_button {float:right;}
