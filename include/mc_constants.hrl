@@ -148,3 +148,11 @@
 
 %% Flags passed back in get_meta call
 -define(GET_META_ITEM_DELETED_FLAG, 16#01).
+
+%% UPR commands
+-define(UPR_OPEN,                  16#50).
+-define(UPR_CTRL_ADD_STREAM,       16#B3).
+-define(UPR_CTRL_CLOSE_STREAM,     16#B4).
+-define(UPR_CTRL_TAKEOVER_STREAM,  16#B5).
+-define(UPR_CLOSE,                 16#B6).
+-define(UPR_CTRL_PERSIST_SEQNO,    16#B7).

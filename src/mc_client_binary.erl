@@ -59,7 +59,11 @@
          map_status/1,
          get_mass_tap_docs_estimate/2,
          ext/2,
-         rev_to_mcd_ext/1
+         rev_to_mcd_ext/1,
+         upr_add_stream/4,
+         upr_close_stream/4,
+         upr_close/3,
+         upr_open/2
         ]).
 
 -type recv_callback() :: fun((_, _, _) -> any()) | undefined.
@@ -81,7 +85,9 @@
                      ?CMD_DEL_WITH_META | ?CMD_DELQ_WITH_META |
                      ?RGET | ?RSET | ?RSETQ | ?RAPPEND | ?RAPPENDQ | ?RPREPEND |
                      ?RPREPENDQ | ?RDELETE | ?RDELETEQ | ?RINCR | ?RINCRQ |
-                     ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE.
+                     ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE |
+                     ?UPR_CTRL_ADD_STREAM | ?UPR_CTRL_CLOSE_STREAM | ?UPR_CTRL_TAKEOVER_STREAM |
+                     ?UPR_OPEN | ?UPR_CLOSE | ?UPR_CTRL_PERSIST_SEQNO.
 
 %% A memcached client that speaks binary protocol.
 -spec cmd(mc_opcode(), port(), recv_callback(), any(),
@@ -506,7 +512,57 @@ disable_traffic(Sock) ->
             process_error_response(Other)
     end.
 
+parse_partition_errors(Bin) ->
+    parse_partition_errors(Bin, []).
 
+parse_partition_errors(<<>>, Acc) ->
+    Acc;
+parse_partition_errors(<< _Partition:16, ?SUCCESS:16, Rest/binary >>, Acc) ->
+    parse_partition_errors(Rest, Acc);
+parse_partition_errors(<< Partition:16, Status:16, Rest/binary >>, Acc) ->
+    parse_partition_errors(Rest, [{Partition, map_status(Status)} | Acc]).
+
+upr_add_or_close_stream(Sock, Command, ConnUUID, ConnName, Partitions) ->
+    Extra = <<ConnUUID:64, << <<Partition:16>> || Partition <- Partitions>>/binary >>,
+    case cmd(Command, Sock, undefined, undefined,
+             {#mc_header{}, #mc_entry{key = ConnName,ext = Extra}}) of
+        {ok, #mc_header{status=?SUCCESS}, #mc_entry{ext = Extra}, _} ->
+            case parse_partition_errors(Extra) of
+                [] ->
+                    ok;
+                Errors ->
+                    {memcached_failed_for_some_partitions, Errors}
+            end;
+        Other ->
+            process_error_response(Other)
+    end.
+
+upr_add_stream(Sock, ConnUUID, ConnName, Partitions) ->
+    upr_add_or_close_stream(Sock, ?UPR_CTRL_ADD_STREAM, ConnUUID, ConnName, Partitions).
+
+upr_close_stream(Sock, ConnUUID, ConnName, Partitions) ->
+    upr_add_or_close_stream(Sock, ?UPR_CTRL_CLOSE_STREAM, ConnUUID, ConnName, Partitions).
+
+upr_close(Sock, ConnUUID, ConnName) ->
+    case cmd(?UPR_CLOSE, Sock, undefined, undefined,
+             {#mc_header{}, #mc_entry{key = ConnName,ext = <<ConnUUID:64>>}}) of
+        {ok, #mc_header{status=?SUCCESS}, _, _} ->
+            ok;
+        Other ->
+            process_error_response(Other)
+    end.
+
+upr_open(Sock, ConnName) ->
+    case cmd(?UPR_OPEN, Sock, undefined, undefined,
+             {#mc_header{}, #mc_entry{key = ConnName,ext = <<0:32>>}}) of
+        {ok, #mc_header{status=?SUCCESS}, #mc_entry{key = ConnUUID}, _} ->
+            {ok, ConnUUID};
+        Other ->
+            process_error_response(Other)
+    end.
+
+
+%% upr_takeover_stream(Sock, ConnUUID, ConnName,
 
 %% -------------------------------------------------
 
