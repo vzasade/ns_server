@@ -27,6 +27,8 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([nuke_connections/3]).
+
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,
                        to_close,
@@ -43,15 +45,8 @@
                }).
 
 init({Producer, Consumer, Bucket}) ->
-    {Username, Password} = ns_bucket:credentials(Bucket),
-
-    ProducerConnName = gen_connection_name("producer", Consumer, Bucket),
-    {ProducerSock, ProducerUUID} = connect(ProducerConnName, ns_memcached:host_port(Producer),
-                                           Username, Password, Bucket),
-
-    ConsumerConnName = gen_connection_name("consumer", Producer, Bucket),
-    {ConsumerSock, ConsumerUUID} = connect(ConsumerConnName, ns_memcached:host_port(Consumer),
-                                           Username, Password, Bucket),
+    {{ProducerSock, ProducerUUID},
+     {ConsumerSock, ConsumerUUID}} = connect_both(Producer, Consumer, Bucket),
 
     #state{
        producer = ProducerSock,
@@ -68,8 +63,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
-    gen_tcp:close(State#state.consumer),
-    gen_tcp:close(State#state.producer).
+    disconnect(State#state.consumer, State#state.consumer_uuid),
+    disconnect(State#state.producer, State#state.producer_uuid).
 
 handle_info({tcp, Socket, Data}, #state{producer = Producer,
                                         consumer = Consumer,
@@ -186,6 +181,25 @@ connect(ConnName, Address, Username, Password, Bucket) ->
     Sock = mc_socket:connect(Address, Username, Password, Bucket),
     {ok, ConnUUID} = mc_client_binary:upr_open(Sock, ConnName),
     {Sock, ConnUUID}.
+
+connect_both(Producer, Consumer, Bucket) ->
+    {Username, Password} = ns_bucket:credentials(Bucket),
+
+    ProducerConnName = gen_connection_name("producer", Consumer, Bucket),
+    ConsumerConnName = gen_connection_name("consumer", Producer, Bucket),
+    {connect(ProducerConnName, ns_memcached:host_port(Producer),
+             Username, Password, Bucket),
+     connect(ConsumerConnName, ns_memcached:host_port(Consumer),
+             Username, Password, Bucket)}.
+
+disconnect(Sock, UUID) ->
+    mc_client_binary:upr_close(Sock, UUID),
+    gen_tcp:close(Sock).
+
+nuke_connections(Producer, Consumer, Bucket) ->
+    {{Sock1, UUID1}, {Sock2, UUID2}} = connect_both(Producer, Consumer, Bucket),
+    disconnect(Sock1, UUID1),
+    disconnect(Sock2, UUID2).
 
 request_add_stream(Partition, State) ->
     Opaque = Partition,

@@ -62,7 +62,7 @@
          rev_to_mcd_ext/1,
          upr_add_stream/4,
          upr_close_stream/4,
-         upr_close/3,
+         upr_close/2,
          upr_open/2
         ]).
 
@@ -522,9 +522,9 @@ upr_close_stream(Sock, ConnUUID, Partition, Opaque) ->
                       {#mc_header{opaque = Opaque},
                        #mc_entry{key = ConnUUID,ext = <<Partition:16>>}}).
 
-upr_close(Sock, ConnUUID, ConnName) ->
+upr_close(Sock, ConnUUID) ->
     case cmd(?UPR_CLOSE, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{key = ConnName,ext = <<ConnUUID:64>>}}) of
+             {#mc_header{}, #mc_entry{ext = <<ConnUUID:64>>}}) of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->
             ok;
         Other ->
