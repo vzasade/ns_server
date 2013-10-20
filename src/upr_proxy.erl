@@ -27,7 +27,7 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([nuke_connections/3]).
+-export([start_link/2, modify_streams/4, nuke_connections/3]).
 
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,
@@ -44,9 +44,9 @@
                 state = idle
                }).
 
-init({Producer, Consumer, Bucket}) ->
+init({ProducerNode, Bucket}) ->
     {{ProducerSock, ProducerUUID},
-     {ConsumerSock, ConsumerUUID}} = connect_both(Producer, Consumer, Bucket),
+     {ConsumerSock, ConsumerUUID}} = connect_both(ProducerNode, node(), Bucket),
 
     #state{
        producer = ProducerSock,
@@ -54,6 +54,13 @@ init({Producer, Consumer, Bucket}) ->
        producer_uuid = ProducerUUID,
        consumer_uuid = ConsumerUUID
       }.
+
+start_link(ProducerNode, Bucket) ->
+    gen_server:start_link({local, server_name(ProducerNode, Bucket)}, ?MODULE,
+                          {ProducerNode, Bucket}, []).
+
+server_name(ProducerNode, Bucket) ->
+    list_to_atom(?MODULE_STRING "-" ++ Bucket ++ "-" ++ atom_to_list(ProducerNode)).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -175,7 +182,7 @@ process_producer_packet(<<?RES_MAGIC:8, Opcode:8, _Rest/binary>> = Packet, State
     handle_packet(response, producer, Opcode, Packet, State).
 
 gen_connection_name(Type, Node, Bucket) ->
-    Type ++ ":" ++ Node ++ ":" ++ Bucket.
+    Type ++ ":" ++ atom_to_list(Node) ++ ":" ++ Bucket.
 
 connect(ConnName, Address, Username, Password, Bucket) ->
     Sock = mc_socket:connect(Address, Username, Password, Bucket),
@@ -200,6 +207,9 @@ nuke_connections(Producer, Consumer, Bucket) ->
     {{Sock1, UUID1}, {Sock2, UUID2}} = connect_both(Producer, Consumer, Bucket),
     disconnect(Sock1, UUID1),
     disconnect(Sock2, UUID2).
+
+modify_streams(ProducerNode, Bucket, StartStreams, StopStreams) ->
+    gen_server:call(server_name(ProducerNode, Bucket), {modify_streams, StartStreams, StopStreams}).
 
 request_add_stream(Partition, State) ->
     Opaque = Partition,
