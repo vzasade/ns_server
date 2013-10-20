@@ -512,36 +512,15 @@ disable_traffic(Sock) ->
             process_error_response(Other)
     end.
 
-parse_partition_errors(Bin) ->
-    parse_partition_errors(Bin, []).
+upr_add_stream(Sock, ConnUUID, Partition, Opaque) ->
+    {ok, quiet} = cmd(?UPR_CTRL_ADD_STREAM, Sock, undefined, undefined,
+                      {#mc_header{opaque = Opaque},
+                       #mc_entry{key = ConnUUID,ext = <<Partition:16>>}}).
 
-parse_partition_errors(<<>>, Acc) ->
-    Acc;
-parse_partition_errors(<< _Partition:16, ?SUCCESS:16, Rest/binary >>, Acc) ->
-    parse_partition_errors(Rest, Acc);
-parse_partition_errors(<< Partition:16, Status:16, Rest/binary >>, Acc) ->
-    parse_partition_errors(Rest, [{Partition, map_status(Status)} | Acc]).
-
-upr_add_or_close_stream(Sock, Command, ConnUUID, ConnName, Partitions) ->
-    Extra = <<ConnUUID:64, << <<Partition:16>> || Partition <- Partitions>>/binary >>,
-    case cmd(Command, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{key = ConnName,ext = Extra}}) of
-        {ok, #mc_header{status=?SUCCESS}, #mc_entry{ext = Extra}, _} ->
-            case parse_partition_errors(Extra) of
-                [] ->
-                    ok;
-                Errors ->
-                    {memcached_failed_for_some_partitions, Errors}
-            end;
-        Other ->
-            process_error_response(Other)
-    end.
-
-upr_add_stream(Sock, ConnUUID, ConnName, Partitions) ->
-    upr_add_or_close_stream(Sock, ?UPR_CTRL_ADD_STREAM, ConnUUID, ConnName, Partitions).
-
-upr_close_stream(Sock, ConnUUID, ConnName, Partitions) ->
-    upr_add_or_close_stream(Sock, ?UPR_CTRL_CLOSE_STREAM, ConnUUID, ConnName, Partitions).
+upr_close_stream(Sock, ConnUUID, Partition, Opaque) ->
+    {ok, quiet} = cmd(?UPR_CTRL_CLOSE_STREAM, Sock, undefined, undefined,
+                      {#mc_header{opaque = Opaque},
+                       #mc_entry{key = ConnUUID,ext = <<Partition:16>>}}).
 
 upr_close(Sock, ConnUUID, ConnName) ->
     case cmd(?UPR_CLOSE, Sock, undefined, undefined,
@@ -589,6 +568,7 @@ is_quiet(?CMD_GETQ_META) -> true;
 is_quiet(?CMD_SETQ_WITH_META) -> true;
 is_quiet(?CMD_ADDQ_WITH_META) -> true;
 is_quiet(?CMD_DELQ_WITH_META) -> true;
+is_quiet(?UPR_CTRL_ADD_STREAM) -> true;
 is_quiet(_)           -> false.
 
 ext(?SET,        Entry) -> ext_flag_expire(Entry);
