@@ -27,7 +27,7 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, modify_streams/4, nuke_connections/3]).
+-export([start_link/2, modify_streams/3, nuke_connections/3]).
 
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,
@@ -48,19 +48,18 @@ init({ProducerNode, Bucket}) ->
     {{ProducerSock, ProducerUUID},
      {ConsumerSock, ConsumerUUID}} = connect_both(ProducerNode, node(), Bucket),
 
-    #state{
-       producer = ProducerSock,
-       consumer = ConsumerSock,
-       producer_uuid = ProducerUUID,
-       consumer_uuid = ConsumerUUID
-      }.
+    proc_lib:init_ack({ok, self()}),
+
+    gen_server:enter_loop(?MODULE, [],
+                          #state{
+                             producer = ProducerSock,
+                             consumer = ConsumerSock,
+                             producer_uuid = ProducerUUID,
+                             consumer_uuid = ConsumerUUID
+                            }).
 
 start_link(ProducerNode, Bucket) ->
-    gen_server:start_link({local, server_name(ProducerNode, Bucket)}, ?MODULE,
-                          {ProducerNode, Bucket}, []).
-
-server_name(ProducerNode, Bucket) ->
-    list_to_atom(?MODULE_STRING "-" ++ Bucket ++ "-" ++ atom_to_list(ProducerNode)).
+    proc_lib:start_link(?MODULE, init, [{ProducerNode, Bucket}]).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -208,8 +207,8 @@ nuke_connections(Producer, Consumer, Bucket) ->
     disconnect(Sock1, UUID1),
     disconnect(Sock2, UUID2).
 
-modify_streams(ProducerNode, Bucket, StartStreams, StopStreams) ->
-    gen_server:call(server_name(ProducerNode, Bucket), {modify_streams, StartStreams, StopStreams}).
+modify_streams(Pid, StartStreams, StopStreams) ->
+    gen_server:call(Pid, {modify_streams, StartStreams, StopStreams}).
 
 request_add_stream(Partition, State) ->
     Opaque = Partition,

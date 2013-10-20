@@ -28,14 +28,13 @@
 -export([start_link/2, setup_replication/4]).
 
 -record(state, {partitions,
-                producer,
-                bucket}).
+                proxy}).
 
 init({ProducerNode, Bucket}) ->
+    {ok, Proxy} = upr_proxy:start_link(ProducerNode, Bucket),
     #state{
        partitions = sets:new(),
-       producer = ProducerNode,
-       bucket = Bucket
+       proxy = Proxy
       }.
 
 start_link(ProducerNode, Bucket) ->
@@ -61,13 +60,12 @@ handle_info(Msg, State) ->
 
 handle_call({setup_replication, Partitions}, _From,
             #state{partitions = CurrentPartitions,
-                   producer = Producer,
-                   bucket = Bucket} = State) ->
+                   proxy = Proxy} = State) ->
     PartitionsSet = sets:from_list(Partitions),
     StreamsToStart = sets:subtract(PartitionsSet, CurrentPartitions),
     StreamsToStop = sets:subtract(CurrentPartitions, StreamsToStart),
 
-    upr_proxy:modify_streams(Producer, Bucket,
+    upr_proxy:modify_streams(Proxy,
                              sets:to_list(StreamsToStart), sets:to_list(StreamsToStop)),
     State#state{partitions = PartitionsSet};
 
