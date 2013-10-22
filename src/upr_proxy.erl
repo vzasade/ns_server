@@ -27,7 +27,7 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, modify_streams/3, nuke_connections/3, gen_connection_name/3]).
+-export([start_link/2, modify_streams/3, takeover/2, nuke_connections/3, gen_connection_name/3]).
 
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,
@@ -37,25 +37,20 @@
 
 -record(state, {producer :: port(),
                 consumer :: port(),
-                producer_uuid :: term(),
-                consumer_uuid :: term(),
                 producer_buf = <<>> :: binary(),
                 consumer_buf = <<>> :: binary(),
                 state = idle
                }).
 
 init({ProducerNode, Bucket}) ->
-    {{ProducerSock, ProducerUUID},
-     {ConsumerSock, ConsumerUUID}} = connect_both(ProducerNode, node(), Bucket),
+    {ProducerSock, ConsumerSock} = connect_both(ProducerNode, node(), Bucket),
 
     proc_lib:init_ack({ok, self()}),
 
     gen_server:enter_loop(?MODULE, [],
                           #state{
                              producer = ProducerSock,
-                             consumer = ConsumerSock,
-                             producer_uuid = ProducerUUID,
-                             consumer_uuid = ConsumerUUID
+                             consumer = ConsumerSock
                             }).
 
 start_link(ProducerNode, Bucket) ->
@@ -69,8 +64,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
-    disconnect(State#state.consumer, State#state.consumer_uuid),
-    disconnect(State#state.producer, State#state.producer_uuid).
+    disconnect(State#state.consumer),
+    disconnect(State#state.producer).
 
 handle_info({tcp, Socket, Data}, #state{producer = Producer,
                                         consumer = Consumer,
@@ -101,13 +96,11 @@ handle_info(Msg, State) ->
 
 handle_call({modify_streams, StartStreams, StopStreams}, From, #state{state=idle} = State) ->
     StartStreamRequests = lists:map(fun (Partition) ->
-                                            {request_add_stream(Partition, State),
-                                             Partition}
+                                            {request_add_stream(Partition, State, regular)}
                                     end, StartStreams),
 
     StopStreamRequests = lists:map(fun (Partition) ->
-                                           {request_close_stream(Partition, State),
-                                            Partition}
+                                           {request_close_stream(Partition, State)}
                                    end, StopStreams),
 
     {noreply, State#state{state = #stream_state{
@@ -117,17 +110,27 @@ handle_call({modify_streams, StartStreams, StopStreams}, From, #state{state=idle
                                      errors = []
                                     }
                          }};
+
+handle_call({takeover, Partition}, From, #state{state=idle} = State) ->
+    {noreply, State#state{state = #stream_state{
+                                     owner = From,
+                                     to_add = [{request_add_stream(Partition, State, takeover)}],
+                                     to_close = [],
+                                     errors = []
+                                    }
+                         }};
+
 handle_call(Command, _From, State) ->
     ?rebalance_warning("Unexpected handle_call(~p, ~p)", [Command, State]),
     {reply, refused, State}.
 
-handle_packet(response, consumer, ?UPR_CTRL_ADD_STREAM, Packet,
+handle_packet(response, consumer, ?UPR_ADD_STREAM, Packet,
               #state{state = #stream_state{to_add = ToAdd, errors = Errors} = StreamState} = State) ->
     {NewToAdd, NewErrors} = process_add_close_stream_response(Packet, ToAdd, Errors),
     NewStreamState = StreamState#stream_state{to_add = NewToAdd, errors = NewErrors},
     State#state{state = maybe_reply_modify_streams(NewStreamState)};
 
-handle_packet(response, consumer, ?UPR_CTRL_CLOSE_STREAM, Packet,
+handle_packet(response, consumer, ?UPR_CLOSE_STREAM, Packet,
               #state{state = #stream_state{to_close = ToClose, errors = Errors} = StreamState} = State) ->
     {NewToClose, NewErrors} = process_add_close_stream_response(Packet, ToClose, Errors),
     NewStreamState = StreamState#stream_state{to_close = NewToClose, errors = NewErrors},
@@ -139,7 +142,7 @@ handle_packet(_, _, _, _, State) ->
 process_add_close_stream_response(Packet, PendingPartitions, Errors) ->
     {Header, Entry} = mc_binary:decode_packet(Packet),
     case lists:keytake(Header#mc_header.opaque, 1, PendingPartitions) of
-        {value, {_, Partition} , N} ->
+        {value, {Partition} , N} ->
             case Header#mc_header.status of
                 ?SUCCESS ->
                     {N, Errors};
@@ -183,41 +186,39 @@ process_producer_packet(<<?RES_MAGIC:8, Opcode:8, _Rest/binary>> = Packet, State
 gen_connection_name(Type, Node, Bucket) ->
     Type ++ ":" ++ atom_to_list(Node) ++ ":" ++ Bucket.
 
-connect(ConnName, Address, Username, Password, Bucket) ->
+connect(Type, ConnName, Address, Username, Password, Bucket) ->
     Sock = mc_socket:connect(Address, Username, Password, Bucket),
-    {ok, ConnUUID} = mc_client_binary:upr_open(Sock, ConnName),
-    {Sock, ConnUUID}.
+    ok = mc_client_binary:upr_open(Sock, ConnName, Type),
+    Sock.
 
 connect_both(Producer, Consumer, Bucket) ->
     {Username, Password} = ns_bucket:credentials(Bucket),
 
     ProducerConnName = gen_connection_name("producer", Consumer, Bucket),
     ConsumerConnName = gen_connection_name("consumer", Producer, Bucket),
-    {connect(ProducerConnName, ns_memcached:host_port(Producer),
+    {connect(producer, ProducerConnName, ns_memcached:host_port(Producer),
              Username, Password, Bucket),
-     connect(ConsumerConnName, ns_memcached:host_port(Consumer),
+     connect(consumer, ConsumerConnName, ns_memcached:host_port(Consumer),
              Username, Password, Bucket)}.
 
-disconnect(Sock, UUID) ->
-    mc_client_binary:upr_close(Sock, UUID),
+disconnect(Sock) ->
     gen_tcp:close(Sock).
 
 nuke_connections(Producer, Consumer, Bucket) ->
-    {{Sock1, UUID1}, {Sock2, UUID2}} = connect_both(Producer, Consumer, Bucket),
-    disconnect(Sock1, UUID1),
-    disconnect(Sock2, UUID2).
+    {Sock1, Sock2} = connect_both(Producer, Consumer, Bucket),
+    disconnect(Sock1),
+    disconnect(Sock2).
 
 modify_streams(Pid, StartStreams, StopStreams) ->
     gen_server:call(Pid, {modify_streams, StartStreams, StopStreams}).
 
-request_add_stream(Partition, State) ->
-    Opaque = Partition,
-    mc_client_binary:upr_add_stream(State#state.consumer, State#state.consumer_uuid,
-                                    Partition, Opaque),
-    Opaque.
+takeover(Pid, Partition) ->
+    gen_server:call(Pid, {takeover, Partition}).
+
+request_add_stream(Partition, State, Type) ->
+    mc_client_binary:upr_add_stream(State#state.consumer, Partition, Type),
+    Partition.
 
 request_close_stream(Partition, State) ->
-    Opaque = Partition,
-    mc_client_binary:upr_close_stream(State#state.consumer, State#state.consumer_uuid,
-                                    Partition, Opaque),
-    Opaque.
+    mc_client_binary:upr_close_stream(State#state.consumer, Partition),
+    Partition.

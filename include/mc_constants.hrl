@@ -151,8 +151,5 @@
 
 %% UPR commands
 -define(UPR_OPEN,                  16#50).
--define(UPR_CTRL_ADD_STREAM,       16#B3).
--define(UPR_CTRL_CLOSE_STREAM,     16#B4).
--define(UPR_CTRL_TAKEOVER_STREAM,  16#B5).
--define(UPR_CLOSE,                 16#B6).
--define(UPR_CTRL_PERSIST_SEQNO,    16#B7).
+-define(UPR_ADD_STREAM,            16#51).
+-define(UPR_CLOSE_STREAM,          16#52).

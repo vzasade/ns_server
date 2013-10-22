@@ -60,10 +60,9 @@
          get_mass_tap_docs_estimate/2,
          ext/2,
          rev_to_mcd_ext/1,
-         upr_add_stream/4,
-         upr_close_stream/4,
-         upr_close/2,
-         upr_open/2
+         upr_add_stream/3,
+         upr_close_stream/2,
+         upr_open/3
         ]).
 
 -type recv_callback() :: fun((_, _, _) -> any()) | undefined.
@@ -86,8 +85,7 @@
                      ?RGET | ?RSET | ?RSETQ | ?RAPPEND | ?RAPPENDQ | ?RPREPEND |
                      ?RPREPENDQ | ?RDELETE | ?RDELETEQ | ?RINCR | ?RINCRQ |
                      ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE |
-                     ?UPR_CTRL_ADD_STREAM | ?UPR_CTRL_CLOSE_STREAM | ?UPR_CTRL_TAKEOVER_STREAM |
-                     ?UPR_OPEN | ?UPR_CLOSE | ?UPR_CTRL_PERSIST_SEQNO.
+                     ?UPR_ADD_STREAM | ?UPR_CLOSE_STREAM | ?UPR_OPEN.
 
 %% A memcached client that speaks binary protocol.
 -spec cmd(mc_opcode(), port(), recv_callback(), any(),
@@ -512,30 +510,37 @@ disable_traffic(Sock) ->
             process_error_response(Other)
     end.
 
-upr_add_stream(Sock, ConnUUID, Partition, Opaque) ->
-    {ok, quiet} = cmd(?UPR_CTRL_ADD_STREAM, Sock, undefined, undefined,
-                      {#mc_header{opaque = Opaque},
-                       #mc_entry{key = ConnUUID,ext = <<Partition:16>>}}).
+upr_add_stream(Sock, Partition, Type) ->
+    Ext = case Type of
+              takeover ->
+                  <<1:32>>;
+              regular ->
+                  <<0:32>>
+          end,
+    {ok, quiet} = cmd(?UPR_ADD_STREAM, Sock, undefined, undefined,
+                      {#mc_header{opaque = Partition,
+                                  vbucket = Partition},
+                       #mc_entry{ext = Ext}}).
 
-upr_close_stream(Sock, ConnUUID, Partition, Opaque) ->
-    {ok, quiet} = cmd(?UPR_CTRL_CLOSE_STREAM, Sock, undefined, undefined,
-                      {#mc_header{opaque = Opaque},
-                       #mc_entry{key = ConnUUID,ext = <<Partition:16>>}}).
+upr_close_stream(Sock, Partition) ->
+    {ok, quiet} = cmd(?UPR_CLOSE_STREAM, Sock, undefined, undefined,
+                      {#mc_header{opaque = Partition,
+                                  vbucket = Partition},
+                       #mc_entry{}}).
 
-upr_close(Sock, ConnUUID) ->
-    case cmd(?UPR_CLOSE, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{ext = <<ConnUUID:64>>}}) of
+upr_open(Sock, ConnName, Type) ->
+    Flags = case Type of
+                consumer ->
+                    <<0:32>>;
+                producer ->
+                    <<1:32>>
+            end,
+    Extra = <<0:32, Flags/binary>>,
+
+    case cmd(?UPR_OPEN, Sock, undefined, undefined,
+             {#mc_header{}, #mc_entry{key = ConnName,ext = Extra}}) of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->
             ok;
-        Other ->
-            process_error_response(Other)
-    end.
-
-upr_open(Sock, ConnName) ->
-    case cmd(?UPR_OPEN, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{key = ConnName,ext = <<0:32>>}}) of
-        {ok, #mc_header{status=?SUCCESS}, #mc_entry{key = ConnUUID}, _} ->
-            {ok, ConnUUID};
         Other ->
             process_error_response(Other)
     end.
@@ -568,7 +573,8 @@ is_quiet(?CMD_GETQ_META) -> true;
 is_quiet(?CMD_SETQ_WITH_META) -> true;
 is_quiet(?CMD_ADDQ_WITH_META) -> true;
 is_quiet(?CMD_DELQ_WITH_META) -> true;
-is_quiet(?UPR_CTRL_ADD_STREAM) -> true;
+is_quiet(?UPR_ADD_STREAM) -> true;
+is_quiet(?UPR_CLOSE_STREAM) -> true;
 is_quiet(_)           -> false.
 
 ext(?SET,        Entry) -> ext_flag_expire(Entry);
