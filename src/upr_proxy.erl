@@ -27,7 +27,7 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, modify_streams/3, nuke_connections/3]).
+-export([start_link/2, modify_streams/3, nuke_connections/3, gen_connection_name/3]).
 
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,

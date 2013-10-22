@@ -25,16 +25,22 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, setup_replication/4]).
+-export([start_link/2, setup_replication/4, wait_for_data_move/4]).
 
 -record(state, {partitions,
-                proxy}).
+                proxy,
+                consumer_conn,
+                bucket}).
+
+-define(VBUCKET_POLL_INTERVAL, 100).
 
 init({ProducerNode, Bucket}) ->
     {ok, Proxy} = upr_proxy:start_link(ProducerNode, Bucket),
     #state{
        partitions = sets:new(),
-       proxy = Proxy
+       proxy = Proxy,
+       consumer_conn = upr_proxy:gen_connection_name("consumer", ProducerNode, Bucket),
+       bucket = Bucket
       }.
 
 start_link(ProducerNode, Bucket) ->
@@ -68,6 +74,8 @@ handle_call({setup_replication, Partitions}, _From,
     upr_proxy:modify_streams(Proxy,
                              sets:to_list(StreamsToStart), sets:to_list(StreamsToStop)),
     State#state{partitions = PartitionsSet};
+handle_call({wait_for_data_move, Partition}, _From, State) ->
+    {reply, do_wait_for_data_move(Partition, State), State};
 
 handle_call(Command, _From, State) ->
     ?rebalance_warning("Unexpected handle_call(~p, ~p)", [Command, State]),
@@ -76,3 +84,19 @@ handle_call(Command, _From, State) ->
 setup_replication(ConsumerNode, ProducerNode, Bucket, Partitions) ->
     gen_server:call({server_name(ProducerNode, Bucket), ConsumerNode},
                     {setup_replication, Partitions}).
+
+wait_for_data_move(ConsumerNode, ProducerNode, Bucket, Partition) ->
+    gen_server:call({server_name(ProducerNode, Bucket), ConsumerNode},
+                    {wait_for_data_move, Partition}).
+
+do_wait_for_data_move(Partition, #state{bucket = Bucket,
+                                        consumer_conn = Conn} = State) ->
+    case ns_memcached:get_vbucket_move_remaining_items(Bucket, Conn, Partition) of
+        undefined ->
+            {error, no_stats_for_this_vbucket};
+        N when N < 1000 ->
+            ok;
+        _ ->
+            timer:sleep(?VBUCKET_POLL_INTERVAL),
+            do_wait_for_data_move(Partition, State)
+    end.
