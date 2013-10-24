@@ -23,7 +23,7 @@
 
 -record(state, {bucket_name :: bucket_name(),
                 repl_type :: tap | upr,
-                remaining_tap_partitions = undefined :: [vbucket_id()],
+                remaining_tap_partitions = undefined :: [vbucket_id()] | undefined,
                 tap_replicator = undefined,
                 upr_replicator = undefined
                }).
@@ -54,7 +54,12 @@ init(Bucket) ->
            }}.
 
 get_incoming_replication_map(Bucket) ->
-    gen_server:call(server_name(Bucket), get_incoming_replication_map, infinity).
+    try gen_server:call(server_name(Bucket), get_incoming_replication_map, infinity) of
+        Result ->
+            Result
+    catch exit:{noproc, _} ->
+            not_running
+    end.
 
 -spec set_incoming_replication_map(bucket_name(),
                                    [{node(), [vbucket_id(),...]}]) -> ok.
@@ -82,9 +87,11 @@ handle_info(_Msg, State) ->
     {noreply, State}.
 
 handle_call(get_incoming_replication_map, _From, State) ->
-    {reply, get_incoming_replications(State), State};
+    {reply, get_actual_replications(State), State};
 handle_call({remove_undesired_replications, FutureReps}, From, State) ->
-    CurrentReps = get_current_replications(State),
+    CurrentReps = call_replicators(get_desired_replications, get_desired_replications,
+                                   fun merge_replications/2, [], State),
+
     Diff = replications_difference(FutureReps, CurrentReps),
     CleanedReps0 = [{N, ordsets:intersection(FutureVBs, CurrentVBs)} || {N, FutureVBs, CurrentVBs} <- Diff],
     CleanedReps = [{N, VBs} || {N, [_|_] = VBs} <- CleanedReps0],
@@ -93,12 +100,12 @@ handle_call({set_desired_replications, DesiredReps}, _From, #state{} = State) ->
     {TReps, UReps} = split_replications(DesiredReps, State),
     State1 = maybe_start_rep_managers(TReps, UReps, State),
 
-    call_replicators({set_desired_replications, TReps},
-                     {set_desired_replications, UReps},
-                     fun(A, B) -> ok = A = B end, ok, State),
+    ok = call_replicators({set_desired_replications, TReps},
+                          {set_desired_replications, UReps},
+                          fun(A, B) -> ok = A = B end, ok, State1),
     {reply, ok, State1};
-handle_call({change_vbucket_replication, VBucket, NewSrc}, _From, #state{bucket_name = Bucket} = State) ->
-    CurrentReps = get_incoming_replications(Bucket),
+handle_call({change_vbucket_replication, VBucket, NewSrc}, _From, State) ->
+    CurrentReps = get_actual_replications(State),
     CurrentReps0 = [{Node, ordsets:del_element(VBucket, VBuckets)}
                     || {Node, VBuckets} <- CurrentReps],
     %% TODO: consider making it faster
@@ -152,12 +159,14 @@ maybe_start_rep_managers(TReps, UReps, #state{bucket_name = Bucket,
                                               upr_replicator = Upr} = State) ->
     {ok, NewTap} = case {Tap, TReps} of
                        {undefined, [_|_]} ->
+                           ?log_info("Start tap_replication_manager"),
                            tap_replication_manager:start_link(Bucket);
                        _ ->
                            {ok, Tap}
                    end,
     {ok, NewUpr} = case {Upr, UReps} of
                        {undefined, [_|_]} ->
+                           ?log_info("Start upr_replication_manager"),
                            upr_replication_manager:start_link(Bucket);
                        _ ->
                            {ok, Upr}
@@ -179,7 +188,7 @@ merge_replications(RepsA, RepsB) ->
     misc:ukeymergewith(MergeFn, 1, RepsA, RepsB).
 
 call_replicators(TapReq, UprReq, MergeCB, Default,
-                 #state{tap_replicator = Tap, upr_replicator = Upr} = State) ->
+                 #state{tap_replicator = Tap, upr_replicator = Upr}) ->
     case {Tap, Upr} of
         {undefined, undefined} ->
             Default;
@@ -193,18 +202,13 @@ call_replicators(TapReq, UprReq, MergeCB, Default,
               gen_server:call(Upr, UprReq, infinity))
     end.
 
-get_current_replications(State) ->
-    call_replicators(get_current_replications, get_current_replications,
-                     fun merge_replications/2, [], State).
-
-%% what's the difference between get_incoming_replications & get_current_replications?
-%% do they ever return different result?
-get_incoming_replications(State) ->
-    call_replicators(get_incoming_replications, get_current_replications,
+get_actual_replications(State) ->
+    call_replicators(get_actual_replications, get_actual_replications,
                      fun merge_replications/2, [], State).
 
 get_replication_type(Bucket) ->
-    case ns_bucket:replication_type(ns_bucket:get_bucket(Bucket)) of
+    {ok, BucketConfig} = ns_bucket:get_bucket(Bucket),
+    case ns_bucket:replication_type(BucketConfig) of
         tap ->
             {tap, ordsets:new()};
         upr ->

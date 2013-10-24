@@ -32,7 +32,7 @@
 
 
 start_link(Bucket) ->
-    proc_lib:start_link(?MODULE, init, Bucket).
+    proc_lib:start_link(?MODULE, init, [Bucket]).
 
 init(Bucket) ->
     T = ets:new(a, [set, private]),
@@ -47,9 +47,9 @@ init(Bucket) ->
 handle_cast(Msg, State) ->
     {stop, {unexpected_cast, Msg}, State}.
 
-handle_call(get_current_replications, _From, #state{desired_replications = CurrentReps} = State) ->
+handle_call(get_desired_replications, _From, #state{desired_replications = CurrentReps} = State) ->
     {reply, CurrentReps, State};
-handle_call(get_incoming_replications, _From, #state{bucket_name = Bucket} = State) ->
+handle_call(get_actual_replications, _From, #state{bucket_name = Bucket} = State) ->
     {reply, get_incoming_replication_map_as_list(Bucket), State};
 handle_call({set_desired_replications, DesiredReps}, _From, #state{} = State) ->
     ok = do_set_incoming_replication_map(State, DesiredReps),

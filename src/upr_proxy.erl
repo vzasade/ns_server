@@ -54,7 +54,7 @@ init({ProducerNode, Bucket}) ->
                             }).
 
 start_link(ProducerNode, Bucket) ->
-    proc_lib:start_link(?MODULE, init, {ProducerNode, Bucket}).
+    proc_lib:start_link(?MODULE, init, [{ProducerNode, Bucket}]).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -68,17 +68,15 @@ terminate(_Reason, State) ->
     disconnect(State#state.producer).
 
 handle_info({tcp, Socket, Data}, #state{producer = Producer,
-                                        consumer = Consumer,
-                                        producer_buf = PBuf,
-                                        consumer_buf = CBuf} = State) ->
+                                        consumer = Consumer} = State) ->
     %% Set up the socket to receive another message
     ok = inet:setopts(Socket, [{active, once}]),
     State1 = case Socket of
                  Producer ->
-                     mc_socket:process_data(Data, PBuf,
+                     mc_socket:process_data(Data, #state.producer_buf,
                                             fun process_producer_packet/2, State);
                  Consumer ->
-                     mc_socket:process_data(Data, CBuf,
+                     mc_socket:process_data(Data, #state.consumer_buf,
                                             fun process_consumer_packet/2, State)
              end,
     {noreply, State1};

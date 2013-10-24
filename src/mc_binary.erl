@@ -248,7 +248,7 @@ my_split_binary(Bin, Lengths) ->
                               end, {[], Bin}, Lengths),
     lists:reverse([Rest | Res]).
 
-decode_packet(<<HeaderBin:?HEADER_LEN, Body/binary>>) ->
+decode_packet(<<HeaderBin:?HEADER_LEN/binary, Body/binary>>) ->
     {#mc_header{extlen = ExtLen, keylen = KeyLen} = Header, Entry} =
         decode_header(HeaderBin),
     [Ext, Key, Data] = my_split_binary(Body, [ExtLen, KeyLen]),
