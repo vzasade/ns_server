@@ -23,6 +23,7 @@
 -export([auth_type/1,
          bucket_nodes/1,
          bucket_type/1,
+         replication_type/1,
          config_string/1,
          create_bucket/3,
          credentials/1,
@@ -451,6 +452,9 @@ moxi_port(Bucket) ->
 
 bucket_nodes(Bucket) ->
     proplists:get_value(servers, Bucket).
+
+replication_type(Bucket) ->
+    proplists:get_value(repl_type, Bucket, tap).
 
 json_map_from_config(LocalAddr, BucketConfig) ->
     NumReplicas = num_replicas(BucketConfig),

@@ -54,7 +54,7 @@ init({ProducerNode, Bucket}) ->
                             }).
 
 start_link(ProducerNode, Bucket) ->
-    proc_lib:start_link(?MODULE, init, [{ProducerNode, Bucket}]).
+    proc_lib:start_link(?MODULE, init, {ProducerNode, Bucket}).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

@@ -36,12 +36,12 @@
 
 init({ProducerNode, Bucket}) ->
     {ok, Proxy} = upr_proxy:start_link(ProducerNode, Bucket),
-    #state{
-       partitions = sets:new(),
-       proxy = Proxy,
-       consumer_conn = upr_proxy:gen_connection_name("consumer", ProducerNode, Bucket),
-       bucket = Bucket
-      }.
+    {ok, #state{
+            partitions = sets:new(),
+            proxy = Proxy,
+            consumer_conn = upr_proxy:gen_connection_name("consumer", ProducerNode, Bucket),
+            bucket = Bucket
+           }}.
 
 start_link(ProducerNode, Bucket) ->
     gen_server:start_link({local, server_name(ProducerNode, Bucket)}, ?MODULE,

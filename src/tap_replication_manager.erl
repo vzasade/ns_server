@@ -17,12 +17,7 @@
 
 -behavior(gen_server).
 
--export([start_link/1,
-         server_name/1,
-         get_incoming_replication_map/1,
-         set_incoming_replication_map/2,
-         change_vbucket_replication/3,
-         remove_undesired_replications/2]).
+-export([start_link/1]).
 
 -export([init/1, handle_call/3, handle_info/2, terminate/2, code_change/3]).
 -export([handle_cast/2]).
@@ -36,58 +31,29 @@
                 desired_replications :: [{node(), [vbucket_id()]}]}).
 
 
-server_name(Bucket) ->
-    list_to_atom("tap_replication_manager-" ++ Bucket).
-
 start_link(Bucket) ->
-    gen_server:start_link({local, server_name(Bucket)}, ?MODULE, [Bucket], []).
+    proc_lib:start_link(?MODULE, init, Bucket).
 
--spec set_incoming_replication_map(bucket_name(),
-                                   [{node(), [vbucket_id(),...]}]) -> ok.
-set_incoming_replication_map(Bucket, DesiredReps) ->
-    gen_server:call(server_name(Bucket), {set_desired_replications, DesiredReps}, infinity).
-
--spec change_vbucket_replication(bucket_name(), vbucket_id(), node() | undefined) -> ok.
-change_vbucket_replication(Bucket, VBucket, ReplicateFrom) ->
-    gen_server:call(server_name(Bucket), {change_vbucket_replication, VBucket, ReplicateFrom}, infinity).
-
--spec remove_undesired_replications(bucket_name(), [{node(), [vbucket_id(),...]}]) -> ok.
-remove_undesired_replications(Bucket, DesiredReps) ->
-    gen_server:call(server_name(Bucket), {remove_undesired_replications, DesiredReps}, infinity).
-
-init([Bucket]) ->
+init(Bucket) ->
     T = ets:new(a, [set, private]),
-    {ok, #state{bucket_name = Bucket,
-                not_readys_per_node_ets = T,
-                desired_replications = []}}.
+
+    proc_lib:init_ack({ok, self()}),
+
+    gen_server:enter_loop(?MODULE, [],
+                          #state{bucket_name = Bucket,
+                                 not_readys_per_node_ets = T,
+                                 desired_replications = []}).
 
 handle_cast(Msg, State) ->
     {stop, {unexpected_cast, Msg}, State}.
 
-handle_call({remove_undesired_replications, FutureReps}, From, #state{desired_replications = CurrentReps} = State) ->
-    Diff = replications_difference(FutureReps, CurrentReps),
-    CleanedReps0 = [{N, ordsets:intersection(FutureVBs, CurrentVBs)} || {N, FutureVBs, CurrentVBs} <- Diff],
-    CleanedReps = [{N, VBs} || {N, [_|_] = VBs} <- CleanedReps0],
-    handle_call({set_desired_replications, CleanedReps}, From, State);
+handle_call(get_current_replications, _From, #state{desired_replications = CurrentReps} = State) ->
+    {reply, CurrentReps, State};
+handle_call(get_incoming_replications, _From, #state{bucket_name = Bucket} = State) ->
+    {reply, get_incoming_replication_map_as_list(Bucket), State};
 handle_call({set_desired_replications, DesiredReps}, _From, #state{} = State) ->
     ok = do_set_incoming_replication_map(State, DesiredReps),
-    {reply, ok, State#state{desired_replications = DesiredReps}};
-handle_call({change_vbucket_replication, VBucket, NewSrc}, _From, #state{bucket_name = Bucket} = State) ->
-    CurrentReps = get_incoming_replication_map_as_list(Bucket),
-    CurrentReps0 = [{Node, ordsets:del_element(VBucket, VBuckets)}
-                    || {Node, VBuckets} <- CurrentReps],
-    %% TODO: consider making it faster
-    DesiredReps = case NewSrc of
-                      undefined ->
-                          CurrentReps0;
-                      _ ->
-                          misc:ukeymergewith(fun ({Node, VBucketsA}, {_, VBucketsB}) ->
-                                                     {Node, ordsets:union(VBucketsA, VBucketsB)}
-                                             end, 1,
-                                             CurrentReps0, [{NewSrc, [VBucket]}])
-                  end,
-    handle_call({set_desired_replications, DesiredReps}, [], State).
-
+    {reply, ok, State#state{desired_replications = DesiredReps}}.
 
 handle_info({have_not_ready_vbuckets, Node}, #state{not_readys_per_node_ets = T} = State) ->
     {ok, TRef} = timer2:send_after(30000, {restart_replicator, Node}),
@@ -127,14 +93,6 @@ do_set_incoming_replication_map(#state{bucket_name = Bucket} = State, DesiredRep
     CurrentReps = get_incoming_replication_map_as_list(Bucket),
     do_set_incoming_replication_map(State, DesiredReps, CurrentReps).
 
-replications_difference(RepsA, RepsB) ->
-    L = [{N, VBs, []} || {N, VBs} <- RepsA],
-    R = [{N, [], VBs} || {N, VBs} <- RepsB],
-    MergeFn = fun ({N, VBsL, []}, {N, [], VBsR}) ->
-                      {N, VBsL, VBsR}
-              end,
-    misc:ukeymergewith(MergeFn, 1, L, R).
-
 categorize_replications([] = _Diff, AccToKill, AccToStart, AccToChange) ->
     {AccToKill, AccToStart, AccToChange};
 categorize_replications([{N, NewVBs, OldVBs} = T | Rest], AccToKill, AccToStart, AccToChange) ->
@@ -146,7 +104,7 @@ categorize_replications([{N, NewVBs, OldVBs} = T | Rest], AccToKill, AccToStart,
     end.
 
 do_set_incoming_replication_map(State, DesiredReps, CurrentReps) ->
-    Diff = replications_difference(DesiredReps, CurrentReps),
+    Diff = replication_manager:replications_difference(DesiredReps, CurrentReps),
     {NodesToKill, NodesToStart, NodesToChange} = categorize_replications(Diff, [], [], []),
     [kill_child(State, SrcNode, VBuckets)
      || {SrcNode, VBuckets} <- NodesToKill],
@@ -197,7 +155,8 @@ change_vbucket_filter(#state{bucket_name = Bucket,
                              not_readys_per_node_ets = T} = State,
                       SrcNode, OldVBuckets, NewVBuckets) ->
     %% TODO: potential slowness here. Consider ordsets
-    ?log_info("Going to change replication from ~p to have~n~p (~p, ~p)", [SrcNode, NewVBuckets, NewVBuckets--OldVBuckets, OldVBuckets--NewVBuckets]),
+    ?log_info("Going to change replication from ~p to have~n~p (~p, ~p)",
+              [SrcNode, NewVBuckets, NewVBuckets--OldVBuckets, OldVBuckets--NewVBuckets]),
     OldChildId = ns_vbm_sup:make_replicator(SrcNode, OldVBuckets),
     NewChildId = ns_vbm_sup:make_replicator(SrcNode, NewVBuckets),
     Args = build_replicator_args(Bucket, SrcNode, NewVBuckets),
