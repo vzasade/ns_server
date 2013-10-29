@@ -27,7 +27,8 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, modify_streams/3, takeover/2, nuke_connections/3, gen_connection_name/3]).
+-export([start_link/2, server_name/2,
+         setup_streams/2, takeover/2, nuke_connections/3, gen_connection_name/3]).
 
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,
@@ -39,22 +40,28 @@
                 consumer :: port(),
                 producer_buf = <<>> :: binary(),
                 consumer_buf = <<>> :: binary(),
-                state = idle
+                state = idle,
+                partitions
                }).
 
 init({ProducerNode, Bucket}) ->
     {ProducerSock, ConsumerSock} = connect_both(ProducerNode, node(), Bucket),
 
+    erlang:register(server_name(ProducerNode, Bucket), self()),
     proc_lib:init_ack({ok, self()}),
 
     gen_server:enter_loop(?MODULE, [],
                           #state{
                              producer = ProducerSock,
-                             consumer = ConsumerSock
+                             consumer = ConsumerSock,
+                             partitions = sets:new()
                             }).
 
 start_link(ProducerNode, Bucket) ->
     proc_lib:start_link(?MODULE, init, [{ProducerNode, Bucket}]).
+
+server_name(ProducerNode, Bucket) ->
+    list_to_atom(?MODULE_STRING "-" ++ Bucket ++ "-" ++ atom_to_list(ProducerNode)).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -92,22 +99,31 @@ handle_info(Msg, State) ->
     ?rebalance_warning("Unexpected handle_info(~p, ~p)", [Msg, State]),
     {noreply, State}.
 
-handle_call({modify_streams, StartStreams, StopStreams}, From, #state{state=idle} = State) ->
+handle_call(get_partitions, _From, #state{partitions=CurrentPartitions} = State) ->
+    {reply, CurrentPartitions, State};
+handle_call({setup_streams, Partitions}, From,
+            #state{state=idle, partitions=CurrentPartitions} = State) ->
+    PartitionsSet = sets:from_list(Partitions),
+    StreamsToStart = sets:subtract(PartitionsSet, CurrentPartitions),
+    StreamsToStop = sets:subtract(CurrentPartitions, StreamsToStart),
+
     StartStreamRequests = lists:map(fun (Partition) ->
                                             {request_add_stream(Partition, State, regular)}
-                                    end, StartStreams),
+                                    end, sets:to_list(StreamsToStart)),
 
     StopStreamRequests = lists:map(fun (Partition) ->
                                            {request_close_stream(Partition, State)}
-                                   end, StopStreams),
+                                   end, sets:to_list(StreamsToStop)),
 
     {noreply, State#state{state = #stream_state{
                                      owner = From,
                                      to_add = StartStreamRequests,
                                      to_close = StopStreamRequests,
                                      errors = []
-                                    }
-                         }};
+                                    },
+                          partitions = PartitionsSet
+                         }
+    };
 
 handle_call({takeover, Partition}, From, #state{state=idle} = State) ->
     {noreply, State#state{state = #stream_state{
@@ -126,13 +142,13 @@ handle_packet(response, consumer, ?UPR_ADD_STREAM, Packet,
               #state{state = #stream_state{to_add = ToAdd, errors = Errors} = StreamState} = State) ->
     {NewToAdd, NewErrors} = process_add_close_stream_response(Packet, ToAdd, Errors),
     NewStreamState = StreamState#stream_state{to_add = NewToAdd, errors = NewErrors},
-    State#state{state = maybe_reply_modify_streams(NewStreamState)};
+    State#state{state = maybe_reply_setup_streams(NewStreamState)};
 
 handle_packet(response, consumer, ?UPR_CLOSE_STREAM, Packet,
               #state{state = #stream_state{to_close = ToClose, errors = Errors} = StreamState} = State) ->
     {NewToClose, NewErrors} = process_add_close_stream_response(Packet, ToClose, Errors),
     NewStreamState = StreamState#stream_state{to_close = NewToClose, errors = NewErrors},
-    State#state{state = maybe_reply_modify_streams(NewStreamState)};
+    State#state{state = maybe_reply_setup_streams(NewStreamState)};
 
 handle_packet(_, _, _, _, State) ->
     State.
@@ -152,7 +168,7 @@ process_add_close_stream_response(Packet, PendingPartitions, Errors) ->
             {PendingPartitions, Errors}
     end.
 
-maybe_reply_modify_streams(StreamState) ->
+maybe_reply_setup_streams(StreamState) ->
     case {StreamState#stream_state.to_add, StreamState#stream_state.to_close} of
         {[], []} ->
             Reply = case StreamState#stream_state.errors of
@@ -207,11 +223,11 @@ nuke_connections(Producer, Consumer, Bucket) ->
     disconnect(Sock1),
     disconnect(Sock2).
 
-modify_streams(Pid, StartStreams, StopStreams) ->
-    gen_server:call(Pid, {modify_streams, StartStreams, StopStreams}).
+setup_streams(Pid, Partitions) ->
+    gen_server:call(Pid, {setup_streams, Partitions}, infinity).
 
 takeover(Pid, Partition) ->
-    gen_server:call(Pid, {takeover, Partition}).
+    gen_server:call(Pid, {takeover, Partition}, infinity).
 
 request_add_stream(Partition, State, Type) ->
     mc_client_binary:upr_add_stream(State#state.consumer, Partition, Type),

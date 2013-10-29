@@ -25,10 +25,9 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, setup_replication/4, wait_for_data_move/4]).
+-export([start_link/2, get_partitions/2, setup_replication/3, wait_for_data_move/4]).
 
--record(state, {partitions,
-                proxy,
+-record(state, {proxy,
                 consumer_conn,
                 bucket}).
 
@@ -37,7 +36,6 @@
 init({ProducerNode, Bucket}) ->
     {ok, Proxy} = upr_proxy:start_link(ProducerNode, Bucket),
     {ok, #state{
-            partitions = sets:new(),
             proxy = Proxy,
             consumer_conn = upr_proxy:gen_connection_name("consumer", ProducerNode, Bucket),
             bucket = Bucket
@@ -64,16 +62,8 @@ handle_info(Msg, State) ->
     ?rebalance_warning("Unexpected handle_info(~p, ~p)", [Msg, State]),
     {noreply, State}.
 
-handle_call({setup_replication, Partitions}, _From,
-            #state{partitions = CurrentPartitions,
-                   proxy = Proxy} = State) ->
-    PartitionsSet = sets:from_list(Partitions),
-    StreamsToStart = sets:subtract(PartitionsSet, CurrentPartitions),
-    StreamsToStop = sets:subtract(CurrentPartitions, StreamsToStart),
-
-    upr_proxy:modify_streams(Proxy,
-                             sets:to_list(StreamsToStart), sets:to_list(StreamsToStop)),
-    State#state{partitions = PartitionsSet};
+handle_call({setup_replication, Partitions}, _From, #state{proxy = Proxy} = State) ->
+    {reply, upr_proxy:setup_streams(Proxy, Partitions), State};
 handle_call({wait_for_data_move, Partition}, _From, State) ->
     {reply, do_wait_for_data_move(Partition, State), State};
 
@@ -81,8 +71,11 @@ handle_call(Command, _From, State) ->
     ?rebalance_warning("Unexpected handle_call(~p, ~p)", [Command, State]),
     {reply, refused, State}.
 
-setup_replication(ConsumerNode, ProducerNode, Bucket, Partitions) ->
-    gen_server:call({server_name(ProducerNode, Bucket), ConsumerNode},
+get_partitions(ProducerNode, Bucket) ->
+    gen_server:call(upr_proxy:server_name(ProducerNode, Bucket), get_partitions, infinity).
+
+setup_replication(ProducerNode, Bucket, Partitions) ->
+    gen_server:call(server_name(ProducerNode, Bucket),
                     {setup_replication, Partitions}).
 
 wait_for_data_move(ConsumerNode, ProducerNode, Bucket, Partition) ->

@@ -23,7 +23,7 @@
 
 -export([start_link/1, init/1]).
 
--export([start_replicator/2, kill_replicator/2]).
+-export([get_actual_replications/1, setup_replication/3]).
 
 start_link(Bucket) ->
     supervisor:start_link({local, server_name(Bucket)}, ?MODULE, []).
@@ -37,6 +37,23 @@ init([]) ->
            misc:get_env_default(max_r, 3),
            misc:get_env_default(max_t, 10)},
           []}}.
+
+get_actual_replications(Bucket) ->
+    case get_producer_nodes(Bucket) of
+        not_running ->
+            not_running;
+        Nodes ->
+            lists:sort([{Node, upr_replicator:get_partitions(Node, Bucket)} || Node <- Nodes])
+    end.
+
+setup_replication(Bucket, ProducerNode, Partitions) ->
+    case Partitions of
+        [] ->
+            kill_replicator(Bucket, ProducerNode);
+        _ ->
+            maybe_start_replicator(Bucket, ProducerNode),
+            upr_replicator:setup_replication(ProducerNode, Bucket, Partitions)
+    end.
 
 -spec get_producer_nodes(bucket_name()) -> list() | not_running.
 get_producer_nodes(Bucket) ->
@@ -53,15 +70,21 @@ build_child_spec(ProducerNode, Bucket) ->
      temporary, 60000, worker, [upr_replicator]}.
 
 
-start_replicator(Bucket, ProducerNode) ->
-    ?log_info("Starting UPR replication from ~p for bucket ~p", [ProducerNode, Bucket]),
-    false = lists:member(ProducerNode, get_producer_nodes(Bucket)),
+maybe_start_replicator(Bucket, ProducerNode) ->
+    case lists:member(ProducerNode, get_producer_nodes(Bucket)) of
+        false ->
+            ?log_info("Starting UPR replication from ~p for bucket ~p", [ProducerNode, Bucket]),
 
-    case supervisor:start_child(server_name(Bucket), build_child_spec(ProducerNode, Bucket)) of
-        {ok, _} = R -> R;
-        {ok, _, _} = R -> R
+            case supervisor:start_child(server_name(Bucket),
+                                        build_child_spec(ProducerNode, Bucket)) of
+                {ok, _} -> ok;
+                {ok, _, _} -> ok
+            end;
+        true ->
+            ok
     end.
 
 kill_replicator(Bucket, ProducerNode) ->
     ?log_info("Going to stop UPR replication from ~p for bucket ~p", [ProducerNode, Bucket]),
-    _ = supervisor:terminate_child(server_name(Bucket), ProducerNode).
+    _ = supervisor:terminate_child(server_name(Bucket), ProducerNode),
+    ok.
