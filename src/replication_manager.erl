@@ -238,9 +238,9 @@ get_replication_type(Bucket) ->
     {ok, BucketConfig} = ns_bucket:get_bucket(Bucket),
     case ns_bucket:replication_type(BucketConfig) of
         tap ->
-            {tap, ordsets:new()};
+            {tap, undefined};
         upr ->
-            {upr, ordsets:new()};
+            {upr, undefined};
         {upr, Partitions} ->
             {both, ordsets:from_list(Partitions)}
     end.
