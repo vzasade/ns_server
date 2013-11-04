@@ -546,8 +546,6 @@ upr_open(Sock, ConnName, Type) ->
     end.
 
 
-%% upr_takeover_stream(Sock, ConnUUID, ConnName,
-
 %% -------------------------------------------------
 
 is_quiet(?GETQ)       -> true;
