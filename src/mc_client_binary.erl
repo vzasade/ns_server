@@ -28,6 +28,8 @@
 
 -export([auth/2,
          cmd/5,
+         cmd_quiet/3,
+         cmd_vocal/3,
          create_bucket/4,
          delete_bucket/3,
          delete_vbucket/2,
@@ -59,10 +61,7 @@
          map_status/1,
          get_mass_tap_docs_estimate/2,
          ext/2,
-         rev_to_mcd_ext/1,
-         upr_add_stream/3,
-         upr_close_stream/2,
-         upr_open/3
+         rev_to_mcd_ext/1
         ]).
 
 -type recv_callback() :: fun((_, _, _) -> any()) | undefined.
@@ -84,8 +83,7 @@
                      ?CMD_DEL_WITH_META | ?CMD_DELQ_WITH_META |
                      ?RGET | ?RSET | ?RSETQ | ?RAPPEND | ?RAPPENDQ | ?RPREPEND |
                      ?RPREPENDQ | ?RDELETE | ?RDELETEQ | ?RINCR | ?RINCRQ |
-                     ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE |
-                     ?UPR_ADD_STREAM | ?UPR_CLOSE_STREAM | ?UPR_OPEN.
+                     ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE.
 
 %% A memcached client that speaks binary protocol.
 -spec cmd(mc_opcode(), port(), recv_callback(), any(),
@@ -99,28 +97,38 @@ cmd(Opcode, Sock, RecvCallback, CBData, HE) ->
                  {ok, #mc_header{}, #mc_entry{}, any()} | {ok, quiet}.
 cmd(Opcode, Sock, RecvCallback, CBData, HE, Timeout) ->
     case is_quiet(Opcode) of
-        true  -> cmd_binary_quiet(Opcode, Sock, RecvCallback, CBData, HE);
-        false -> cmd_binary_vocal(Opcode, Sock, RecvCallback, CBData, HE,
+        true  -> cmd_quiet(Opcode, Sock, HE);
+        false -> cmd_vocal(Opcode, Sock, RecvCallback, CBData, HE,
                                   Timeout)
     end.
 
-cmd_binary_quiet(Opcode, Sock, _RecvCallback, _CBData, {Header, Entry}) ->
+-spec cmd_quiet(integer(), port(),
+                {#mc_header{}, #mc_entry{}}) ->
+                       {ok, quiet}.
+cmd_quiet(Opcode, Sock, {Header, Entry}) ->
     ok = mc_binary:send(Sock, req,
               Header#mc_header{opcode = Opcode}, ext(Opcode, Entry)),
     {ok, quiet}.
 
-cmd_binary_vocal(?STAT = Opcode, Sock, RecvCallback, CBData,
+-spec cmd_vocal(integer(), port(),
+                {#mc_header{}, #mc_entry{}}) ->
+                       {ok, #mc_header{}, #mc_entry{}}.
+cmd_vocal(Opcode, Sock, HE) ->
+    {ok, RecvHeader, RecvEntry, _NCB} = cmd_vocal(Opcode, Sock, undefined, undefined, HE, undefined),
+    {ok, RecvHeader, RecvEntry}.
+
+cmd_vocal(?STAT = Opcode, Sock, RecvCallback, CBData,
                  {Header, Entry}, Timeout) ->
     ok = mc_binary:send(Sock, req, Header#mc_header{opcode = Opcode}, Entry),
     stats_recv(Sock, RecvCallback, CBData, Timeout);
 
-cmd_binary_vocal(Opcode, Sock, RecvCallback, CBData, {Header, Entry},
+cmd_vocal(Opcode, Sock, RecvCallback, CBData, {Header, Entry},
                  Timeout) ->
     ok = mc_binary:send(Sock, req,
               Header#mc_header{opcode = Opcode}, ext(Opcode, Entry)),
-    cmd_binary_vocal_recv(Opcode, Sock, RecvCallback, CBData, Timeout).
+    cmd_vocal_recv(Opcode, Sock, RecvCallback, CBData, Timeout).
 
-cmd_binary_vocal_recv(Opcode, Sock, RecvCallback, CBData, Timeout) ->
+cmd_vocal_recv(Opcode, Sock, RecvCallback, CBData, Timeout) ->
     {ok, RecvHeader, RecvEntry} = mc_binary:recv(Sock, res, Timeout),
     NCB = case is_function(RecvCallback) of
               true  -> RecvCallback(RecvHeader, RecvEntry, CBData);
@@ -128,7 +136,7 @@ cmd_binary_vocal_recv(Opcode, Sock, RecvCallback, CBData, Timeout) ->
           end,
     case Opcode =:= RecvHeader#mc_header.opcode of
         true  -> {ok, RecvHeader, RecvEntry, NCB};
-        false -> cmd_binary_vocal_recv(Opcode, Sock, RecvCallback, NCB, Timeout)
+        false -> cmd_vocal_recv(Opcode, Sock, RecvCallback, NCB, Timeout)
     end.
 
 % -------------------------------------------------
@@ -510,42 +518,6 @@ disable_traffic(Sock) ->
             process_error_response(Other)
     end.
 
-upr_add_stream(Sock, Partition, Type) ->
-    Ext = case Type of
-              takeover ->
-                  <<1:32>>;
-              regular ->
-                  <<0:32>>
-          end,
-    {ok, quiet} = cmd(?UPR_ADD_STREAM, Sock, undefined, undefined,
-                      {#mc_header{opaque = Partition,
-                                  vbucket = Partition},
-                       #mc_entry{ext = Ext}}).
-
-upr_close_stream(Sock, Partition) ->
-    {ok, quiet} = cmd(?UPR_CLOSE_STREAM, Sock, undefined, undefined,
-                      {#mc_header{opaque = Partition,
-                                  vbucket = Partition},
-                       #mc_entry{}}).
-
-upr_open(Sock, ConnName, Type) ->
-    Flags = case Type of
-                consumer ->
-                    <<0:32>>;
-                producer ->
-                    <<1:32>>
-            end,
-    Extra = <<0:32, Flags/binary>>,
-
-    case cmd(?UPR_OPEN, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{key = ConnName,ext = Extra}}) of
-        {ok, #mc_header{status=?SUCCESS}, _, _} ->
-            ok;
-        Other ->
-            process_error_response(Other)
-    end.
-
-
 %% -------------------------------------------------
 
 is_quiet(?GETQ)       -> true;
@@ -571,8 +543,6 @@ is_quiet(?CMD_GETQ_META) -> true;
 is_quiet(?CMD_SETQ_WITH_META) -> true;
 is_quiet(?CMD_ADDQ_WITH_META) -> true;
 is_quiet(?CMD_DELQ_WITH_META) -> true;
-is_quiet(?UPR_ADD_STREAM) -> true;
-is_quiet(?UPR_CLOSE_STREAM) -> true;
 is_quiet(_)           -> false.
 
 ext(?SET,        Entry) -> ext_flag_expire(Entry);
