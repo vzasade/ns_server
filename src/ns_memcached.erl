@@ -115,7 +115,8 @@
          eval/2,
          wait_for_checkpoint_persistence/3,
          get_tap_docs_estimate/3,
-         get_mass_tap_docs_estimate/2]).
+         get_mass_tap_docs_estimate/2,
+         get_vbucket_move_remaining_items/3]).
 
 -include("mc_constants.hrl").
 -include("mc_entry.hrl").
@@ -574,9 +575,21 @@ do_handle_call({get_vbucket_checkpoint_ids, VBucketId}, _From, State) ->
             end,
             {undefined, undefined}),
     {reply, Res, State};
+do_handle_call({get_vbucket_move_remaining_items, ConnName, VBucket}, _From, State) ->
+    VBucketStr = integer_to_list(VBucket),
+    Key = list_to_binary("bucket-takeover " ++ ConnName ++ " " ++ VBucketStr),
+    VBucketKey = list_to_binary("vb_" ++ VBucketStr),
+
+    {ok, Reply} = mc_binary:quick_stats(State#state.sock,
+                                        Key,
+                                        fun (VKey, <<K/binary>>, _Acc) when VKey =:= VBucketKey ->
+                                                list_to_integer(binary_to_list(K));
+                                            (_, _, Acc) -> Acc
+                                        end, undefined),
+    {reply, Reply, State};
+
 do_handle_call(_, _From, State) ->
     {reply, unhandled, State}.
-
 
 complete_connection_phase({ok, Sock}, Bucket) ->
     case ensure_bucket(Sock, Bucket) of
@@ -635,7 +648,6 @@ handle_cast(start_completed, #state{start_time=Start,
                         connected
                 end,
     {noreply, State#state{status=NewStatus}}.
-
 
 handle_info(check_started, #state{status=Status} = State)
   when Status =:= connected orelse Status =:= warmed ->
@@ -1109,6 +1121,9 @@ get_vbucket_open_checkpoint(Nodes, Bucket, VBucketId) ->
                                         {ok, {undefined | checkpoint_id(), undefined | checkpoint_id()}}.
 get_vbucket_checkpoint_ids(Bucket, VBucketId) ->
     do_call(server(Bucket), {get_vbucket_checkpoint_ids, VBucketId}, ?TIMEOUT).
+
+get_vbucket_move_remaining_items(Bucket, ConnName, VBucket) ->
+    do_call(server(Bucket), {get_vbucket_move_remaining_items, ConnName, VBucket}, ?TIMEOUT).
 
 connect_and_send_isasl_refresh() ->
     case connect(1) of

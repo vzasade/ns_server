@@ -59,7 +59,8 @@
          wait_checkpoint_persisted/5,
          get_tap_docs_estimate/4,
          get_tap_docs_estimate_many_taps/4,
-         get_mass_tap_docs_estimate/3]).
+         get_mass_tap_docs_estimate/3,
+         wait_upr_data_move/5]).
 
 -export([start_link/1]).
 
@@ -334,7 +335,7 @@ prepare_nodes_for_rebalance(Bucket, Nodes, RebalancerPid) ->
 %% It's also ok to do 'dirty' reads, i.e. outside of janitor agent,
 %% because stale data is ok.
 this_node_replicator_triples(Bucket) ->
-    case tap_replication_manager:get_incoming_replication_map(Bucket) of
+    case replication_manager:get_incoming_replication_map(Bucket) of
         not_running ->
             [];
         List ->
@@ -398,6 +399,10 @@ wait_index_updated(Bucket, Rebalancer, NewMasterNode, _ReplicaNodes, VBucket) ->
                           {wait_index_updated, VBucket}},
                          infinity).
 
+wait_upr_data_move(Bucket, Rebalancer, MasterNode, ReplicaNodes, VBucket) ->
+    gen_server:multi_call(ReplicaNodes, server_name(Bucket),
+                          {if_rebalance, Rebalancer,
+                           {wait_upr_data_move, MasterNode, VBucket}}, infinity).
 
 %% returns checkpoint id which 100% contains all currently persisted
 %% docs. Normally it's persisted_checkpoint_id + 1 (assuming
@@ -491,7 +496,7 @@ handle_call(query_vbucket_states, _From, #state{bucket_name = BucketName} = Stat
     {reply, RV, NewState};
 handle_call(get_incoming_replication_map, _From, #state{bucket_name = BucketName} = State) ->
     %% NOTE: has infinite timeouts but uses only local communication
-    RV = tap_replication_manager:get_incoming_replication_map(BucketName),
+    RV = replication_manager:get_incoming_replication_map(BucketName),
     {reply, RV, State};
 handle_call({prepare_rebalance, _Pid}, _From,
             #state{last_applied_vbucket_states = undefined} = State) ->
@@ -519,7 +524,7 @@ handle_call({update_vbucket_state, VBucket, NormalState, RebalanceState, Replica
                            rebalance_only_vbucket_states = NewRebalanceVBuckets},
     %% TODO: consider infinite timeout. It's local memcached after all
     ok = ns_memcached:set_vbucket(BucketName, VBucket, NormalState),
-    ok = tap_replication_manager:change_vbucket_replication(BucketName, VBucket, ReplicateFrom),
+    ok = replication_manager:change_vbucket_replication(BucketName, VBucket, ReplicateFrom),
     {reply, ok, pass_vbucket_states_to_set_view_manager(NewState)};
 handle_call({apply_new_config, NewBucketConfig, IgnoredVBuckets}, _From, #state{bucket_name = BucketName} = State) ->
     %% ?log_debug("handling apply_new_config:~n~p", [NewBucketConfig]),
@@ -565,7 +570,7 @@ handle_call({apply_new_config, NewBucketConfig, IgnoredVBuckets}, _From, #state{
                                         Dst =:= node()],
     WantedReplications = [{Src, [VB || {_, VB} <- Pairs]}
                           || {Src, Pairs} <- misc:keygroup(1, lists:sort(WantedReplicas))],
-    ok = tap_replication_manager:remove_undesired_replications(BucketName, WantedReplications),
+    ok = replication_manager:remove_undesired_replications(BucketName, WantedReplications),
 
     %% then we're ok to change vbucket states
     [ns_memcached:set_vbucket(BucketName, VBucket, StateToSet)
@@ -590,7 +595,7 @@ handle_call({apply_new_config_replicas_phase, NewBucketConfig, IgnoredVBuckets},
                                         Dst =:= node()],
     WantedReplications = [{Src, [VB || {_, VB} <- Pairs]}
                           || {Src, Pairs} <- misc:keygroup(1, lists:sort(WantedReplicas))],
-    ok = tap_replication_manager:set_incoming_replication_map(BucketName, WantedReplications),
+    ok = replication_manager:set_incoming_replication_map(BucketName, WantedReplications),
     {reply, ok, State};
 handle_call({delete_vbucket, VBucket}, _From, #state{bucket_name = BucketName} = State) ->
     {reply, ok = ns_memcached:delete_vbucket(BucketName, VBucket), State};
@@ -600,6 +605,14 @@ handle_call({wait_index_updated, VBucket}, From, #state{bucket_name = Bucket} = 
                From,
                fun () ->
                        capi_set_view_manager:wait_index_updated(Bucket, VBucket)
+               end),
+    {noreply, State2};
+handle_call({wait_upr_data_move, MasterNode, VBucket}, From, #state{bucket_name = Bucket} = State) ->
+    State2 = spawn_rebalance_subprocess(
+               State,
+               From,
+               fun () ->
+                       upr_replicator:wait_for_data_move(MasterNode, Bucket, VBucket)
                end),
     {noreply, State2};
 handle_call(initiate_indexing, From, #state{bucket_name = Bucket} = State) ->
@@ -812,7 +825,7 @@ perform_flush(#state{bucket_name = BucketName} = State, BucketConfig, ConfigFlus
     pass_vbucket_states_to_set_view_manager(NewState),
     ok = capi_set_view_manager:reset_master_vbucket(BucketName),
     ?log_info("Shutting down incoming replications"),
-    ok = tap_replication_manager:set_incoming_replication_map(BucketName, []),
+    ok = replication_manager:set_incoming_replication_map(BucketName, []),
     %% kill all vbuckets
     [ok = ns_memcached:sync_delete_vbucket(BucketName, VB)
      || {VB, _} <- VBStates],
