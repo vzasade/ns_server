@@ -27,17 +27,25 @@
 
 -export([start_link/2, get_partitions/2, setup_replication/3, wait_for_data_move/3]).
 
--record(state, {proxy,
-                consumer_conn,
+-record(state, {producer_conn :: pid(),
+                consumer_conn :: pid(),
+                connection_name,
                 bucket}).
 
 -define(VBUCKET_POLL_INTERVAL, 100).
 
 init({ProducerNode, Bucket}) ->
-    {ok, Proxy} = upr_proxy:start_link(ProducerNode, Bucket),
+    ConnName = gen_connection_name(node(), ProducerNode, Bucket),
+    {ok, ConsumerConn} = upr_consumer_conn:start_link(ConnName, Bucket),
+    {ok, ProducerConn} = upr_producer_conn:start_link(ConnName, ProducerNode, Bucket),
+
+    erlang:register(consumer_server_name(ProducerNode, Bucket), ConsumerConn),
+
+    upr_proxy:connect_proxies(ConsumerConn, ProducerConn),
     {ok, #state{
-            proxy = Proxy,
-            consumer_conn = upr_proxy:gen_connection_name("consumer", ProducerNode, Bucket),
+            producer_conn = ProducerConn,
+            consumer_conn = ConsumerConn,
+            connection_name = ConnName,
             bucket = Bucket
            }}.
 
@@ -47,6 +55,9 @@ start_link(ProducerNode, Bucket) ->
 
 server_name(ProducerNode, Bucket) ->
     list_to_atom(?MODULE_STRING "-" ++ Bucket ++ "-" ++ atom_to_list(ProducerNode)).
+
+consumer_server_name(ProducerNode, Bucket) ->
+    list_to_atom("upr_consumer_conn-" ++ Bucket ++ "-" ++ atom_to_list(ProducerNode)).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -62,8 +73,8 @@ handle_info(Msg, State) ->
     ?rebalance_warning("Unexpected handle_info(~p, ~p)", [Msg, State]),
     {noreply, State}.
 
-handle_call({setup_replication, Partitions}, _From, #state{proxy = Proxy} = State) ->
-    {reply, upr_proxy:setup_streams(Proxy, Partitions), State};
+handle_call({setup_replication, Partitions}, _From, #state{consumer_conn = Pid} = State) ->
+    {reply, upr_consumer_conn:setup_streams(Pid, Partitions), State};
 handle_call({wait_for_data_move, Partition}, From, State) ->
     proc_lib:spawn_link(erlang, apply, [fun do_wait_for_data_move/3, [Partition, From, State]]),
     {noreply, State};
@@ -73,7 +84,7 @@ handle_call(Command, _From, State) ->
     {reply, refused, State}.
 
 get_partitions(ProducerNode, Bucket) ->
-    gen_server:call(upr_proxy:server_name(ProducerNode, Bucket), get_partitions, infinity).
+    gen_server:call(consumer_server_name(ProducerNode, Bucket), get_partitions, infinity).
 
 setup_replication(ProducerNode, Bucket, Partitions) ->
     gen_server:call(server_name(ProducerNode, Bucket),
@@ -93,3 +104,6 @@ do_wait_for_data_move(Partition, From, #state{bucket = Bucket,
             timer:sleep(?VBUCKET_POLL_INTERVAL),
             do_wait_for_data_move(Partition, From, State)
     end.
+
+gen_connection_name(ConsumerNode, ProducerNode, Bucket) ->
+    atom_to_list(ProducerNode) ++ "->" ++ atom_to_list(ConsumerNode) ++ ":" ++ Bucket.
