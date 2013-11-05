@@ -24,7 +24,7 @@
 -export([start_link/2,
          setup_streams/2, takeover/2]).
 
--export([init/0, handle_packet/4, handle_call/4]).
+-export([init/1, handle_packet/4, handle_call/4]).
 
 -record(stream_state, {owner :: {pid(), any()},
                        to_add,
@@ -37,9 +37,9 @@
                }).
 
 start_link(ConnName, Bucket) ->
-    upr_proxy:start_link(consumer, ConnName, node(), Bucket, ?MODULE).
+    upr_proxy:start_link(consumer, ConnName, node(), Bucket, ?MODULE, []).
 
-init() ->
+init([]) ->
     #state{
        partitions = sets:new()
       }.
@@ -69,11 +69,13 @@ handle_call({setup_streams, Partitions}, From, Sock,
     StreamsToStop = sets:subtract(CurrentPartitions, StreamsToStart),
 
     StartStreamRequests = lists:map(fun (Partition) ->
-                                            {request_add_stream(Partition, Sock, regular)}
+                                            upr_add_stream(Sock, Partition),
+                                            {Partition}
                                     end, sets:to_list(StreamsToStart)),
 
     StopStreamRequests = lists:map(fun (Partition) ->
-                                           {request_close_stream(Partition, Sock)}
+                                           upr_close_stream(Sock, Partition),
+                                           {Partition}
                                    end, sets:to_list(StreamsToStop)),
 
     {noreply, State#state{state = #stream_state{
@@ -87,9 +89,10 @@ handle_call({setup_streams, Partitions}, From, Sock,
     };
 
 handle_call({takeover, Partition}, From, Sock, #state{state=idle} = State) ->
+    upr_takeover(Sock, Partition),
     {noreply, State#state{state = #stream_state{
                                      owner = From,
-                                     to_add = [{request_add_stream(Partition, Sock, takeover)}],
+                                     to_add = [{}],
                                      to_close = [],
                                      errors = []
                                     }
@@ -135,10 +138,23 @@ setup_streams(Pid, Partitions) ->
 takeover(Pid, Partition) ->
     gen_server:call(Pid, {takeover, Partition}, infinity).
 
-request_add_stream(Partition, Sock, Type) ->
-    mc_client_binary:upr_add_stream(Sock, Partition, Type),
-    Partition.
+%% UPR commands
 
-request_close_stream(Partition, Sock) ->
-    mc_client_binary:upr_close_stream(Sock, Partition),
-    Partition.
+upr_add_stream(Sock, Partition) ->
+    {ok, quiet} = mc_client_binary:cmd_quiet(?UPR_ADD_STREAM, Sock,
+                                             {#mc_header{opaque = Partition,
+                                                         vbucket = Partition},
+                                              #mc_entry{ext = <<0:32>>}}).
+
+upr_takeover(Sock, Partition) ->
+    upr_proxy:process_upr_response(
+      mc_client_binary:cmd_vocal(?UPR_ADD_STREAM, Sock,
+                                 {#mc_header{opaque = Partition,
+                                             vbucket = Partition},
+                                  #mc_entry{ext = <<1:32>>}})).
+
+upr_close_stream(Sock, Partition) ->
+    {ok, quiet} = mc_client_binary:cmd_quiet(?UPR_CLOSE_STREAM, Sock,
+                                             {#mc_header{opaque = Partition,
+                                                         vbucket = Partition},
+                                              #mc_entry{}}).

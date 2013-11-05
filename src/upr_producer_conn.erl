@@ -18,15 +18,21 @@
 -module(upr_producer_conn).
 
 -include("ns_common.hrl").
+-include("mc_constants.hrl").
+-include("mc_entry.hrl").
 
--export([start_link/3, init/0, handle_packet/4, handle_call/4]).
+-export([start_link/4, init/1, handle_packet/4, handle_call/4]).
 
-start_link(ConnName, ProducerNode, Bucket) ->
-    upr_proxy:start_link(producer, ConnName, ProducerNode, Bucket, ?MODULE).
+start_link(ConnName, ProducerNode, Bucket, ConsumerConn) ->
+    upr_proxy:start_link(producer, ConnName, ProducerNode, Bucket, ?MODULE, ConsumerConn).
 
-init() ->
-    {}.
+init(ConsumerConn) ->
+    ConsumerConn.
 
+handle_packet(request, ?UPR_SET_VBUCKET_STATE, Packet, ConsumerConn) ->
+    {Header, Entry} = mc_binary:decode_packet(Packet),
+    gen_server:cast(ConsumerConn, {set_vbucket_state, Header#mc_header.opaque, Entry#mc_entry.ext}),
+    ConsumerConn;
 handle_packet(_, _, _, State) ->
     State.
 

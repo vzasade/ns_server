@@ -37,7 +37,7 @@
 init({ProducerNode, Bucket}) ->
     ConnName = gen_connection_name(node(), ProducerNode, Bucket),
     {ok, ConsumerConn} = upr_consumer_conn:start_link(ConnName, Bucket),
-    {ok, ProducerConn} = upr_producer_conn:start_link(ConnName, ProducerNode, Bucket),
+    {ok, ProducerConn} = upr_producer_conn:start_link(ConnName, ProducerNode, Bucket, ConsumerConn),
 
     erlang:register(consumer_server_name(ProducerNode, Bucket), ConsumerConn),
 
