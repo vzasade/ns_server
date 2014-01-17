@@ -165,6 +165,23 @@ wait_index_updated(Bucket, Parent, NewNode, ReplicaNodes, VBucket) ->
             ok
     end.
 
+wait_upr_data_move(Bucket, Parent, SrcNode, DstNodes, VBucket) ->
+    spawn_and_wait(
+      fun () ->
+              {Replies, BadNodes} =
+                  janitor_agent:wait_upr_data_move(Bucket, Parent, SrcNode, DstNodes, VBucket),
+              ?log_debug("Upr data is up to date for bucket = ~p partition ~p src node = ~p dest nodes = ~p",
+                         [Bucket, VBucket, SrcNode, DstNodes]),
+              NonOks = [P || {_N, V} = P <- Replies,
+                             V =/= ok],
+              case (NonOks =:= []) and (BadNodes =:= []) of
+                  true -> ok;
+                  false ->
+                      erlang:error({upr_wait_for_data_move_failed,
+                                    Bucket, VBucket, SrcNode, DstNodes, NonOks, BadNodes})
+              end
+      end).
+
 inhibit_view_compaction(Parent, Node, Bucket, NewNode) ->
     case cluster_compat_mode:rebalance_ignore_view_compactions() of
         false ->

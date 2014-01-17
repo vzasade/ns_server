@@ -25,7 +25,7 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([start_link/2, get_partitions/2, setup_replication/3]).
+-export([start_link/2, get_partitions/2, setup_replication/3, wait_for_data_move/3]).
 
 -record(state, {producer_conn :: pid(),
                 consumer_conn :: pid(),
@@ -75,6 +75,9 @@ handle_info(Msg, State) ->
 
 handle_call({setup_replication, Partitions}, _From, #state{consumer_conn = Pid} = State) ->
     {reply, upr_consumer_conn:setup_streams(Pid, Partitions), State};
+handle_call({wait_for_data_move, Partition}, From, State) ->
+    proc_lib:spawn_link(erlang, apply, [fun do_wait_for_data_move/3, [Partition, From, State]]),
+    {noreply, State};
 
 handle_call(Command, _From, State) ->
     ?rebalance_warning("Unexpected handle_call(~p, ~p)", [Command, State]),
@@ -91,6 +94,21 @@ get_partitions(ProducerNode, Bucket) ->
 setup_replication(ProducerNode, Bucket, Partitions) ->
     gen_server:call(server_name(ProducerNode, Bucket),
                     {setup_replication, Partitions}).
+
+wait_for_data_move(ProducerNode, Bucket, Partition) ->
+    gen_server:call(server_name(ProducerNode, Bucket), {wait_for_data_move, Partition}).
+
+do_wait_for_data_move(Partition, From, #state{bucket = Bucket,
+                                              consumer_conn = Conn} = State) ->
+    case ns_memcached:get_vbucket_move_remaining_items(Bucket, Conn, Partition) of
+        undefined ->
+            gen_server:reply(From, {error, no_stats_for_this_vbucket});
+        N when N < 1000 ->
+            gen_server:reply(From, ok);
+        _ ->
+            timer:sleep(?VBUCKET_POLL_INTERVAL),
+            do_wait_for_data_move(Partition, From, State)
+    end.
 
 gen_connection_name(ConsumerNode, ProducerNode, Bucket) ->
     atom_to_list(ProducerNode) ++ "->" ++ atom_to_list(ConsumerNode) ++ ":" ++ Bucket.
