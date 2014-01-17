@@ -22,7 +22,7 @@
 -include("mc_entry.hrl").
 
 -export([start_link/2,
-         setup_streams/2]).
+         setup_streams/2, takeover/2]).
 
 -export([init/1, handle_packet/4, handle_call/4, handle_cast/2]).
 
@@ -31,6 +31,10 @@
                        to_close,
                        errors
                       }).
+
+-record(takeover_state, {owner :: {pid(), any()},
+                         partition
+                        }).
 
 -record(state, {state = idle,
                 partitions
@@ -97,10 +101,27 @@ handle_call({setup_streams, Partitions}, From, Sock,
                                  }}
     end;
 
+handle_call({takeover, Partition}, From, Sock, #state{state=idle} = State) ->
+    upr_takeover(Sock, Partition),
+    {noreply, State#state{state = #takeover_state{
+                                     owner = From,
+                                     partition = Partition
+                                    }
+                         }};
+
 handle_call(Command, _From, _Sock, State) ->
     ?rebalance_warning("Unexpected handle_call(~p, ~p)", [Command, State]),
     {reply, refused, State}.
 
+handle_cast({set_vbucket_state, Partition, ?VB_STATE_DEAD},
+            #state{state = #takeover_state{owner = From,
+                                           partition = Partition}} = State) ->
+    gen_server:reply(From, ok),
+    {noreply, State#state{state = idle}};
+handle_cast({set_vbucket_state, Partition, _},
+            #state{state = #takeover_state{partition = Partition}} = State) ->
+    %% ignore state changes other than dead for takeover buckets for now
+    {noreply, State};
 handle_cast(Msg, State) ->
     ?rebalance_warning("Unhandled cast: ~p", [Msg]),
     {noreply, State}.
@@ -141,12 +162,22 @@ maybe_reply_setup_streams(StreamState) ->
 setup_streams(Pid, Partitions) ->
     gen_server:call(Pid, {setup_streams, Partitions}, infinity).
 
+takeover(Pid, Partition) ->
+    gen_server:call(Pid, {takeover, Partition}, infinity).
+
 %% UPR commands
 upr_add_stream(Sock, Partition) ->
     {ok, quiet} = mc_client_binary:cmd_quiet(?UPR_ADD_STREAM, Sock,
                                              {#mc_header{opaque = Partition,
                                                          vbucket = Partition},
                                               #mc_entry{ext = <<0:32>>}}).
+
+upr_takeover(Sock, Partition) ->
+    ok = upr_proxy:process_upr_response(
+           mc_client_binary:cmd_vocal(?UPR_ADD_STREAM, Sock,
+                                      {#mc_header{opaque = Partition,
+                                                  vbucket = Partition},
+                                       #mc_entry{ext = <<1:32>>}})).
 
 upr_close_stream(Sock, Partition) ->
     {ok, quiet} = mc_client_binary:cmd_quiet(?UPR_CLOSE_STREAM, Sock,
