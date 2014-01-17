@@ -119,7 +119,9 @@
          get_mass_tap_docs_estimate/2,
          set_cluster_config/2,
          get_random_key/1,
-         get_vbucket_move_remaining_items/3]).
+         get_vbucket_move_remaining_items/3,
+         get_vbucket_high_seqno/2,
+         wait_for_seqno_persistence/3]).
 
 -include("mc_constants.hrl").
 -include("mc_entry.hrl").
@@ -269,6 +271,10 @@ handle_call({wait_for_checkpoint_persistence, VBucket, CheckpointId}, From, Stat
     proc_lib:spawn_link(erlang, apply, [fun perform_wait_for_checkpoint_persistence/5,
                                         [self(), VBucket, CheckpointId, From, State]]),
     {noreply, State};
+handle_call({wait_for_seqno_persistence, VBucket, SeqNo}, From, State) ->
+    proc_lib:spawn_link(erlang, apply, [fun perform_wait_for_seqno_persistence/5,
+                                        [self(), VBucket, SeqNo, From, State]]),
+    {noreply, State};
 handle_call(Msg, From, State) ->
     StartTS = os:timestamp(),
     NewState = queue_call(Msg, From, StartTS, State),
@@ -305,6 +311,13 @@ verify_report_long_call(StartTS, ActualStartTS, State, Msg, RV) ->
 perform_wait_for_checkpoint_persistence(Parent, VBucket, CheckpointId, From, State0) ->
     #state{sock = Sock} = do_worker_init(State0),
     RV = mc_client_binary:wait_for_checkpoint_persistence(Sock, VBucket, CheckpointId),
+    erlang:unlink(Parent),
+    gen_server:reply(From, RV).
+
+%% for wait_for_seqno_persistence we just always establish new connection
+perform_wait_for_seqno_persistence(Parent, VBucket, CheckpointId, From, State0) ->
+    #state{sock = Sock} = do_worker_init(State0),
+    RV = mc_client_binary:wait_for_seqno_persistence(Sock, VBucket, CheckpointId),
     erlang:unlink(Parent),
     gen_server:reply(From, RV).
 
@@ -601,6 +614,20 @@ do_handle_call({get_vbucket_move_remaining_items, ConnName, VBucket}, _From, Sta
                                             (_, _, Acc) -> Acc
                                         end, undefined),
     {reply, Reply, State};
+do_handle_call({get_vbucket_high_seqno, VBucketId}, _From, State) ->
+    StatName = <<"vb_", (iolist_to_binary(integer_to_list(VBucketId)))/binary, "_high_seqno">>,
+    Res = mc_binary:quick_stats(
+            State#state.sock, iolist_to_binary([<<"vbucket-seqno ">>, integer_to_list(VBucketId)]),
+            fun (K, V, Acc) ->
+                    case K of
+                        StatName ->
+                            list_to_integer(binary_to_list(V));
+                        _ ->
+                            Acc
+                    end
+            end,
+            undefined),
+    {reply, Res, State};
 
 do_handle_call(_, _From, State) ->
     {reply, unhandled, State}.
@@ -1145,6 +1172,11 @@ get_vbucket_open_checkpoint(Nodes, Bucket, VBucketId) ->
 get_vbucket_checkpoint_ids(Bucket, VBucketId) ->
     do_call(server(Bucket), {get_vbucket_checkpoint_ids, VBucketId}, ?TIMEOUT).
 
+-spec get_vbucket_high_seqno(bucket_name(), vbucket_id()) ->
+                                        {ok, {undefined | seq_no()}}.
+get_vbucket_high_seqno(Bucket, VBucketId) ->
+    do_call(server(Bucket), {get_vbucket_high_seqno, VBucketId}, ?TIMEOUT).
+
 get_vbucket_move_remaining_items(Bucket, ConnName, VBucket) ->
     do_call(server(Bucket), {get_vbucket_move_remaining_items, ConnName, VBucket}, ?TIMEOUT).
 
@@ -1346,6 +1378,10 @@ disable_traffic(Bucket, Timeout) ->
 -spec wait_for_checkpoint_persistence(bucket_name(), vbucket_id(), checkpoint_id()) -> ok | mc_error().
 wait_for_checkpoint_persistence(Bucket, VBucketId, CheckpointId) ->
     gen_server:call(server(Bucket), {wait_for_checkpoint_persistence, VBucketId, CheckpointId}, infinity).
+
+-spec wait_for_seqno_persistence(bucket_name(), vbucket_id(), seq_no()) -> ok | mc_error().
+wait_for_seqno_persistence(Bucket, VBucketId, SeqNo) ->
+    gen_server:call(server(Bucket), {wait_for_seqno_persistence, VBucketId, SeqNo}, infinity).
 
 -spec get_tap_docs_estimate(bucket_name(), vbucket_id(), binary()) ->
                                    {ok, {non_neg_integer(), non_neg_integer(), binary()}}.

@@ -63,7 +63,8 @@
          ext/2,
          rev_to_mcd_ext/1,
          set_cluster_config/2,
-         get_random_key/1
+         get_random_key/1,
+         wait_for_seqno_persistence/3
         ]).
 
 -type recv_callback() :: fun((_, _, _) -> any()) | undefined.
@@ -86,7 +87,7 @@
                      ?RGET | ?RSET | ?RSETQ | ?RAPPEND | ?RAPPENDQ | ?RPREPEND |
                      ?RPREPENDQ | ?RDELETE | ?RDELETEQ | ?RINCR | ?RINCRQ |
                      ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE |
-                     ?CMD_GET_RANDOM_KEY.
+                     ?CMD_SEQNO_PERSISTENCE | ?CMD_GET_RANDOM_KEY.
 
 %% A memcached client that speaks binary protocol.
 -spec cmd(mc_opcode(), port(), recv_callback(), any(),
@@ -853,6 +854,19 @@ wait_for_checkpoint_persistence(Sock, VBucket, CheckpointId) ->
              {#mc_header{vbucket = VBucket},
               #mc_entry{key = <<"">>,
                         data = <<CheckpointId:64/big>>}},
+             infinity),
+    case RV of
+        {ok, #mc_header{status=?SUCCESS}, _, _} ->
+            ok;
+        Other ->
+            process_error_response(Other)
+    end.
+
+wait_for_seqno_persistence(Sock, VBucket, SeqNo) ->
+    RV = cmd(?CMD_SEQNO_PERSISTENCE, Sock, undefined, undefined,
+             {#mc_header{vbucket = VBucket},
+              #mc_entry{key = <<"">>,
+                        data = <<SeqNo:64/big>>}},
              infinity),
     case RV of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->

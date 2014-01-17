@@ -152,6 +152,22 @@ wait_checkpoint_persisted_many(Bucket, Parent, FewNodes, VBucket, WaitedCheckpoi
               end
       end).
 
+wait_seqno_persisted_many(Bucket, Parent, Nodes, VBucket, SeqNo) ->
+    spawn_and_wait(
+      fun () ->
+              RVs = misc:parallel_map(
+                      fun (Node) ->
+                              {Node, (catch janitor_agent:wait_seqno_persisted(Bucket, Parent, Node, VBucket, SeqNo))}
+                      end, Nodes, infinity),
+              NonOks = [P || {_N, V} = P <- RVs,
+                             V =/= ok],
+              case NonOks =:= [] of
+                  true -> ok;
+                  false ->
+                      erlang:error({wait_seqno_persisted_failed, Bucket, VBucket, SeqNo, NonOks})
+              end
+      end).
+
 wait_index_updated(Bucket, Parent, NewNode, ReplicaNodes, VBucket) ->
     case ns_config_ets_dup:unreliable_read_key(rebalance_index_waiting_disabled, false) of
         false ->
