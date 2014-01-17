@@ -223,6 +223,25 @@ inhibit_view_compaction(Parent, Node, Bucket, NewNode) ->
             ok
     end.
 
+mover_inner_upr(Parent, Bucket, VBucket,
+                [OldMaster|_] = OldChain, [NewMaster|_] = NewChain) ->
+    inhibit_view_compaction(Parent, OldMaster, Bucket, NewMaster),
+
+    % build new chain as replicas of existing master
+    {ReplicaNodes, JustBackfillNodes} =
+        get_replica_and_backfill_nodes(OldMaster, NewChain),
+
+    set_initial_vbucket_state(Bucket, Parent, VBucket, OldMaster, ReplicaNodes, JustBackfillNodes),
+
+    AllBuiltNodes = JustBackfillNodes ++ ReplicaNodes,
+
+    wait_upr_data_move(Bucket, Parent, OldMaster, AllBuiltNodes, VBucket),
+
+    SeqNo = janitor_agent:get_vbucket_high_seqno(Bucket, Parent, OldMaster, VBucket),
+    ?rebalance_info("Will wait for seqno ~p on replicas", [SeqNo]),
+
+    wait_seqno_persisted_many(Bucket, Parent, AllBuiltNodes, VBucket, SeqNo).
+
 mover_inner(Parent, Bucket, VBucket,
             [Node|_] = OldChain, [NewNode|_] = NewChain) ->
     process_flag(trap_exit, true),
@@ -322,12 +341,15 @@ get_replica_and_backfill_nodes(MasterNode, [NewMasterNode|_] = NewChain) ->
     true = (JustBackfillNodes =/= [undefined]),
     {ReplicaNodes, JustBackfillNodes}.
 
-set_initial_vbucket_state(Bucket, Parent, VBucket, ReplicaNodes, JustBackfillNodes) ->
-    Changes = [{Replica, replica, undefined, undefined}
+set_initial_vbucket_state(Bucket, Parent, VBucket, SrcNode, ReplicaNodes, JustBackfillNodes) ->
+    Changes = [{Replica, replica, undefined, SrcNode}
                || Replica <- ReplicaNodes]
-        ++ [{FutureMaster, replica, passive, undefined}
+        ++ [{FutureMaster, replica, passive, SrcNode}
             || FutureMaster <- JustBackfillNodes],
     janitor_agent:bulk_set_vbucket_state(Bucket, Parent, VBucket, Changes).
+
+set_initial_vbucket_state(Bucket, Parent, VBucket, ReplicaNodes, JustBackfillNodes) ->
+    set_initial_vbucket_state(Bucket, Parent, VBucket, undefined, ReplicaNodes, JustBackfillNodes).
 
 mover_inner_old_style(Parent, Bucket, VBucket,
                       [Node|_], [NewNode|_] = NewChain) ->
