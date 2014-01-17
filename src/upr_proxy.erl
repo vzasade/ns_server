@@ -110,17 +110,25 @@ handle_packet(Type, Msg, Packet,
     end,
     {ok, State#state{ext_state = NewExtState}}.
 
+-ifdef(DEBUG_UPR).
+-define(print_proxied_packet(X), ?rebalance_info("Proxy packet: ~p", [format_packet_nicely(Packet)])).
+-else.
+-define(print_proxied_packet(X), ok).
+-endif.
+
 process_packet(<<?REQ_MAGIC:8, Opcode:8, _Rest/binary>> = Packet, State) ->
+    ?print_proxied_packet(X),
     handle_packet(request, Opcode, Packet, State);
 process_packet(<<?RES_MAGIC:8, Opcode:8, _KeyLen:16, _ExtLen:8,
                  _DataType:8, Status:16, _Rest/binary>> = Packet, State) ->
     case Status of
         ?SUCCESS ->
-            ok;
+            ?print_proxied_packet(X);
         _ ->
             ?rebalance_warning("Received error response: ~p", [format_packet_nicely(Packet)])
     end,
     handle_packet(response, Opcode, Packet, State).
+
 
 connect(Type, ConnName, Node, Bucket) ->
     {Username, Password} = ns_bucket:credentials(Bucket),
