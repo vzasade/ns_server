@@ -22,7 +22,7 @@
 -include("mc_entry.hrl").
 
 -export([start_link/2,
-         setup_streams/2]).
+         setup_streams/2, takeover/2, maybe_close_stream/2]).
 
 -export([init/1, handle_packet/4, handle_call/4, handle_cast/2]).
 
@@ -31,6 +31,10 @@
                        to_close,
                        errors
                       }).
+
+-record(takeover_state, {owner :: {pid(), any()},
+                         opaque
+                        }).
 
 -record(state, {state = idle,
                 partitions
@@ -57,18 +61,32 @@ handle_packet(response, ?UPR_CLOSE_STREAM, Packet,
     NewStreamState = StreamState#stream_state{to_close = NewToClose, errors = NewErrors},
     {block, maybe_reply_setup_streams(State#state{state = NewStreamState})};
 
+handle_packet(response, ?UPR_SET_VBUCKET_STATE, Packet,
+              #state{state = #takeover_state{owner = From, opaque = Opaque}} = State) ->
+    {Header, Entry} = mc_binary:decode_packet(Packet),
+    case {Header#mc_header.opaque, Entry#mc_entry.ext} of
+        {Opaque, ?VB_STATE_ACTIVE} ->
+            gen_server:reply(From, ok),
+            {proxy, State#state{state = idle}};
+        _ ->
+            {proxy, State}
+    end;
+
 handle_packet(_, _, _, State) ->
     {proxy, State}.
 
 handle_call(get_partitions, _From, _Sock, #state{partitions=CurrentPartitions} = State) ->
     {reply, ordsets:to_list(CurrentPartitions), State};
 
+handle_call({maybe_close_stream, Partition}, From, Sock,
+            #state{state=idle, partitions=CurrentPartitions} = State) ->
+    StreamsToSet = ordsets:subtract(CurrentPartitions, ordsets:from_list([Partition])),
+    handle_call({setup_streams, StreamsToSet}, From, Sock, State);
+
 handle_call({setup_streams, Partitions}, From, Sock,
             #state{state=idle, partitions=CurrentPartitions} = State) ->
-    PartitionsSet = ordsets:from_list(Partitions),
-
-    StreamsToStart = ordsets:to_list(ordsets:subtract(PartitionsSet, CurrentPartitions)),
-    StreamsToStop = ordsets:to_list(ordsets:subtract(CurrentPartitions, PartitionsSet)),
+    StreamsToStart = ordsets:to_list(ordsets:subtract(Partitions, CurrentPartitions)),
+    StreamsToStop = ordsets:to_list(ordsets:subtract(CurrentPartitions, Partitions)),
 
     case {StreamsToStart, StreamsToStop} of
         {[], []} ->
@@ -93,8 +111,25 @@ handle_call({setup_streams, Partitions}, From, Sock,
                                              to_close = StopStreamRequests,
                                              errors = []
                                             },
-                                  partitions = PartitionsSet
+                                  partitions = Partitions
                                  }}
+    end;
+
+handle_call({takeover, Partition}, From, Sock, #state{state=idle, partitions=Partitions} = State) ->
+    case ordsets:is_element(Partition, Partitions) of
+        true ->
+            {reply, {error, takeover_on_open_stream_is_not_allowed}, State};
+        false ->
+            case upr_takeover(Sock, Partition) of
+                {ok, Opaque} ->
+                    {noreply, State#state{state = #takeover_state{
+                                                     owner = From,
+                                                     opaque = Opaque
+                                                    }
+                                         }};
+                Error ->
+                    {reply, Error, State}
+            end
     end;
 
 handle_call(Command, _From, _Sock, State) ->
@@ -141,7 +176,13 @@ maybe_reply_setup_streams(#state{state = StreamState, partitions = Partitions} =
     end.
 
 setup_streams(Pid, Partitions) ->
-    gen_server:call(Pid, {setup_streams, Partitions}, infinity).
+    gen_server:call(Pid, {setup_streams, ordsets:from_list(Partitions)}, infinity).
+
+maybe_close_stream(Pid, Partition) ->
+    gen_server:call(Pid, {maybe_close_stream, Partition}, infinity).
+
+takeover(Pid, Partition) ->
+    gen_server:call(Pid, {takeover, Partition}, infinity).
 
 %% UPR commands
 upr_add_stream(Sock, Partition) ->
@@ -149,6 +190,20 @@ upr_add_stream(Sock, Partition) ->
                                              {#mc_header{opaque = Partition,
                                                          vbucket = Partition},
                                               #mc_entry{ext = <<0:32>>}}).
+
+upr_takeover(Sock, Partition) ->
+    Resp = mc_client_binary:cmd_vocal(?UPR_ADD_STREAM, Sock,
+                                      {#mc_header{opaque = Partition,
+                                                  vbucket = Partition},
+                                       #mc_entry{ext = <<1:32>>}}),
+
+    case upr_proxy:process_upr_response(Resp) of
+        ok ->
+            {ok, _Header, Entry} = Resp,
+            {ok, Entry#mc_entry.ext};
+        Error ->
+            Error
+    end.
 
 upr_close_stream(Sock, Partition) ->
     {ok, quiet} = mc_client_binary:cmd_quiet(?UPR_CLOSE_STREAM, Sock,
