@@ -43,6 +43,8 @@
          note_indexing_initiated/3,
          note_checkpoint_waiting_started/4,
          note_checkpoint_waiting_ended/4,
+         note_seqno_waiting_started/4,
+         note_seqno_waiting_ended/4,
          note_backfill_phase_ended/2,
          note_wait_index_updated_started/3,
          note_wait_index_updated_ended/3,
@@ -150,6 +152,12 @@ note_checkpoint_waiting_started(BucketName, VBucket, WaitedCheckpointId, Nodes) 
 
 note_checkpoint_waiting_ended(BucketName, VBucket, WaitedCheckpointId, Nodes) ->
     submit_cast({checkpoint_waiting_ended, BucketName, VBucket, WaitedCheckpointId, Nodes}).
+
+note_seqno_waiting_started(BucketName, VBucket, SeqNo, Nodes) ->
+    submit_cast({seqno_waiting_started, BucketName, VBucket, SeqNo, Nodes}).
+
+note_seqno_waiting_ended(BucketName, VBucket, SeqNo, Nodes) ->
+    submit_cast({seqno_waiting_ended, BucketName, VBucket, SeqNo, Nodes}).
 
 note_backfill_phase_ended(BucketName, VBucket) ->
     submit_cast({backfill_phase_ended, BucketName, VBucket}).
