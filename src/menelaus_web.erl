@@ -475,6 +475,11 @@ loop_inner(Req, AppRoot, Path, PathTokens) ->
                          ["erlwsh" | _] ->
                              {done, erlwsh_web:loop(Req, erlwsh_deps:local_path(["priv", "www"]))};
                          ["couchBase" | _] -> {done, capi_http_proxy:handle_proxy_req(Req)};
+                         ["collectLogs", "start"] ->
+                             {auth, fun menelaus_collect_logs:handle_collect_logs_start/1};
+                         ["collectLogs", "cancel"] ->
+                             {auth, fun menelaus_collect_logs:handle_collect_logs_cancel/1};
+
                          _ ->
                              ?MENELAUS_WEB_LOG(0001, "Invalid post received: ~p", [Req]),
                              {done, reply_not_found(Req)}
