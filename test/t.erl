@@ -36,7 +36,7 @@
 
 -include("ns_common.hrl").
 
--export([start/0, start_with_coverage/0, config/1]).
+-export([start/0, start_with_coverage/0, config/1, fake_loggers/0]).
 
 start() ->
     start_without_coverage().

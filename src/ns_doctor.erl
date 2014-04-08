@@ -586,7 +586,30 @@ do_build_tasks_list(NodesDict, NeedNodeP, PoolId, AllRepDocs) ->
     WarmupTasks = [[{status, running} | KV]
                    || KV <- WarmupTasks0],
 
-    PreRebalanceTasks1 = SampleBucketTasks ++ WarmupTasks ++ XDCRTasks ++ PreRebalanceTasks0,
+    %% There will be one Collect Logs task per cluster node, so there is potentially
+    %% data for the last collectLogs triggered from every node; so in aggregate
+    %% potentially many collect attempts. We need to show the details for
+    %% "completed" (i.e. idle) colelctions in the UI, but only the most recent
+    %% one, so filter CollectLogsTask0 to only show the most recently updated task.
+    CollectLogsTask0 =
+        lists:filter(fun (RawTask) ->
+                         case proplists:get_value(type, RawTask) of
+                             collect_logs -> true;
+                             _ ->            false
+                         end
+                     end, AllRawTasks),
+    CollectLogsTask =
+        [lists:foldl(fun(T, Acc) ->
+                         Last = proplists:get_value(last_updated, T),
+                         Max = proplists:get_value(last_updated, Acc),
+                         case Last > Max of
+                             true  -> T;
+                             false -> Acc
+                         end
+                     end, [{last_updated, 0}], CollectLogsTask0)],
+
+    PreRebalanceTasks1 = SampleBucketTasks ++ WarmupTasks ++ XDCRTasks
+                         ++ PreRebalanceTasks0 ++ CollectLogsTask,
 
     PreRebalanceTasks2 =
         lists:sort(

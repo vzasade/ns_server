@@ -45,16 +45,14 @@ handle_collect_logs_start(Req) ->
         false -> 400
     end,
     try parse_validate_collect_logs_start(Config, JSON) of
-        {ok, Args} ->
-            case ValidateOnly of
-                false ->
-                    ?log_info("handle_collect_logs_post OK: ~p~n", [Args] ),
-                    % TODO: Actually start log collection here.
-                    menelaus_util:reply_json(Req, [], 200);
-                true ->
-                    menelaus_util:reply_json(Req, {struct,
-                                                   [{errors, null}]}, 200)
-            end
+        {ok, [{nodes, Nodes}, {upload, Upload}] = Args} when ValidateOnly =:= false ->
+            ?log_info("handle_collect_logs_post OK: ~p~n", [Args] ),
+            Result = collect_logs_manager:begin_collection(Nodes, Upload),
+            {Code, Reply} = format_reply(Result),
+            ?log_info("handle_collect_logs_post Code:~p Reply: ~p~n", [Code, Reply] ),
+            menelaus_util:reply_json(Req, Reply, Code);
+        {ok, _Args} when ValidateOnly ->
+            menelaus_util:reply_json(Req, {struct, [{errors, null}]}, 200)
     catch throw:{collect_logs_parse_error, Errors} ->
             menelaus_util:reply_json(Req, {struct, [{errors, Errors}]},
                                      ErrorReturnCode)
@@ -62,12 +60,23 @@ handle_collect_logs_start(Req) ->
 
 %% Handles collectLogs/cancel POST request (i.e. cancel log collection).
 handle_collect_logs_cancel(Req) ->
-    menelaus_util:reply_json(Req, {struct, [{list, [ <<"handle_logs_collect">>,
-                                                     <<"CANCEL">>]}]}).
+    case collect_logs_manager:cancel_collection() of
+        ok -> menelaus_util:reply_json(Req, [], 200);
+        _  -> menelaus_util:reply_json(Req, [], 400)
+    end.
 
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
+
+format_reply(in_progress) ->
+    {200, []};
+format_reply({error, {already_started, _Pid}}) ->
+    {400, {struct, [{errors, {struct, [{<<"general">>,
+                                        <<"Log collection already started">>}]}}]}};
+format_reply({error, already_running}) ->
+    {400, {struct, [{errors, {struct, [{<<"general">>,
+                                        <<"Log collection already started">>}]}}]}}.
 
 %% Given a JSON document containing the arguments passed for collect_log_start,
 %% parse and validate them.

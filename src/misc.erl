@@ -61,7 +61,7 @@ randomize() ->
 
 % formats time (see erlang:localtime/0) as ISO-8601 text
 iso_8601_fmt({{Year,Month,Day},{Hour,Min,Sec}}) ->
-    io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B ~2.10.0B:~2.10.0B:~2.10.0B",
+    io_lib:format("~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~2.10.0B",
                   [Year, Month, Day, Hour, Min, Sec]).
 
 %% applies (catch Fun(X)) for each element of list in parallel. If
@@ -1639,3 +1639,48 @@ min_by(Less, Items) ->
 
 inspect_term(Value) ->
     binary_to_list(iolist_to_binary(io_lib:format("~p", [Value]))).
+
+%% Returns the path to a writable system tempory directory, or 'error' if
+%% unable to locate one.
+find_writable_tempdir() ->
+    % Search a list of possible envionment variables, finding the first which
+    % %% is writable.
+    case lists:foldl(fun(Env, []) ->
+                         case os:getenv(Env) of
+                             false -> [];
+                             D     -> is_writeable_dir(D)
+                         end;
+                        (_X, Acc) ->
+                            Acc
+                     end,
+                     [], ["TMPDIR", "TEMP", "TMP"]) of
+        [] ->
+            % No suitable env var path, fallback to OS default locations
+            Dirs = case os:type() of
+                       {unix, _}  -> ["/tmp", "/var/tmp", "/usr/tmp"];
+                       {win32, _} -> ["C:\TEMP", "C:\TMP", "\TEMP", "\TMP"]
+                   end,
+            case lists:foldl(fun(D, []) ->
+                                 is_writeable_dir(D);
+                                (_X, Acc) ->
+                                 Acc
+                             end, [], Dirs) of
+                []    -> error;
+                Path1 -> Path1
+            end;
+        Path2 -> Path2
+    end.
+
+%% Returns the directory if the specified path (as a string) is a writable directory,
+%% else an empty array.
+is_writeable_dir(F) ->
+    case file:read_file_info(F) of
+        {ok, Info} ->
+            case (Info#file_info.type =:= directory)
+                and (Info#file_info.access =:= read_write) of
+                true -> F;
+                false -> []
+            end;
+        {error, _} ->
+            []
+    end.

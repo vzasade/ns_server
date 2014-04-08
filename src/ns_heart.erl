@@ -283,7 +283,8 @@ current_status_slow() ->
         end , couch_task_status:all())
         ++ grab_local_xdcr_replications()
         ++ grab_samples_loading_tasks()
-        ++ grab_warmup_tasks(),
+        ++ grab_warmup_tasks()
+        ++ grab_collect_logs_task(),
 
     MaybeMeminfo =
         case misc:raw_read_file("/proc/meminfo") of
@@ -457,3 +458,41 @@ grab_warmup_tasks() ->
     lists:foldl(fun (Bucket, Acc) ->
                         Acc ++ grab_warmup_task(Bucket)
                 end, [], BucketNames).
+
+%% Returns information on any collect_logs tasks on this node.
+grab_collect_logs_task() ->
+    try
+        CollectStatus = collect_logs_manager:get_status(),
+        CollectLogsTask =
+            case proplists:get_value(status, CollectStatus) of
+                idle ->
+                    Nodes = proplists:get_value(nodes, CollectStatus),
+                    [[{type, collect_logs},
+                      {status, idle},
+                      proplists:lookup(last_updated, CollectStatus),
+                      {perNode, [{struct, N} || N <- Nodes]}]];
+                in_progress ->
+                    Nodes = proplists:get_value(nodes, CollectStatus),
+                    % Calculate the process as the percentage of nodes
+                    % completed (i.e. not pending or in_progress)
+                    Progress = case lists:foldl(fun(Props, {Completed, Total}) ->
+                        case proplists:get_value(result, Props) of
+                            <<"pending">>     -> {Completed, Total + 1};
+                            <<"in_progress">> -> {Completed, Total + 1};
+                            _                 -> {Completed + 1, Total + 1}
+                        end
+                    end, {0, 0}, Nodes) of
+                                   {_, 0} -> 0;
+                                   {Completed, Total} -> Completed * 100.0 / Total
+                               end,
+                    [[{type, collect_logs},
+                      {status, running},
+                      proplists:lookup(last_updated, CollectStatus),
+                      {progress, Progress},
+                      {perNode, [{struct, N} || N <- Nodes]}]]
+            end,
+        CollectLogsTask
+    catch T:E ->
+        ?log_error("Failed to grab collect logs task: ~p", [{T,E,erlang:get_stacktrace()}]),
+        []
+    end.

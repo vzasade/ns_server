@@ -1,0 +1,86 @@
+#!/usr/bin/python
+# -*- python -*-
+
+# Mock implementation of cbcollect_info. Just echos the output specified on the
+# command line, and returns the code specified on the cmdline.
+
+import argparse
+import sys
+import thread
+from threading import Thread
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Mock cbcollect_info.')
+    parser.add_argument('zip_file')
+    parser.add_argument('--mock_output', help='Override normal output')
+    parser.add_argument('--mock_result', type=int,
+                        help='Override normal result')
+    parser.add_argument('--mock_hang', action='store_const', const=True,
+                        help='Hang the process')
+    parser.add_argument('--script', action='store_const', const=True)
+    parser.add_argument('--upload', action='store_const', const=True)
+    parser.add_argument('--upload-host', default="????")
+    parser.add_argument('--customer', default="????")
+    parser.add_argument('--ticket')
+    args = parser.parse_args()
+
+    if not args.script:
+        print ("bunch of random non-machine parsible output. Run with " +
+               " --script for the correct scriptable form.")
+        sys.exit(0)
+
+    if args.upload:
+        url = args.upload_host + "/" + args.customer
+        if args.ticket:
+            url += "/" + args.ticket
+        url += "/" + args.zip_file
+        print "status: uploaded"
+        print "artifact: " + url
+
+    if args.mock_output:
+        # Output whatever we were told to.
+        print args.mock_output.replace('\\n', '\n')
+
+    if args.mock_result:
+        sys.exit(args.mock_result)
+
+    if args.mock_hang:
+        # Wait forever; expect to exit by virtue of receiving 'shutdown' on
+        # stdin (see StdinReader below).
+        while True:
+            pass
+
+    sys.exit(0)
+
+
+class StdinReader:
+    def __init__(self):
+
+        def _watchStdin():
+            """
+            Read from and consume stdin, watching for "exit" - when detected
+            terminate the process.
+            """
+            while True:
+                line = sys.stdin.readline()
+                if line:
+                    line = line.strip()
+                    if line == "shutdown":
+                        thread.interrupt_main()
+                else:
+                    # Unable to read line; assume stdin has been broken -
+                    # terminate.
+                    thread.interrupt_main()
+
+        self._thread = Thread(target=_watchStdin, name='StdinReader')
+        self._thread.daemon = True
+        self._thread.start()
+
+if __name__ == '__main__':
+    try:
+        # Spin up reader thread to watch for commands from stdin.
+        reader = StdinReader()
+        main()
+    except KeyboardInterrupt:
+        sys.exit(1)
