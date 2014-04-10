@@ -1,21 +1,57 @@
 #!/usr/bin/python
 # -*- python -*-
+import glob
+import mmap
 import os
+import platform
+import re
+import signal
+import socket
+import string
+import subprocess
 import sys
 import tempfile
+import thread
+from threading import Thread
 import time
-import subprocess
-import string
-import re
-import platform
-import glob
-import socket
+import urllib2
+import urlparse
 
 USAGE = """usage: %prog [options] output_file.zip
 
 - Linux/Windows/OSX:
     %prog output_file.zip
     %prog -v output_file.zip"""
+
+QUIET = ""
+QUIET_OUTPUT = ""
+
+
+class StdinReader:
+    """Gives erlang the abilty to shutdown down the process by sending
+    'shutdown' to STDIN. If the erlang parent process dies cbcollect will exit.
+    """
+    def __init__(self):
+
+        def _watchStdin():
+            """Read from and consume stdin, watching for "exit" - when detected
+            terminate the process.
+            """
+            while True:
+                line = sys.stdin.readline()
+                if line:
+                    line = line.strip()
+                    if line == "shutdown":
+                        thread.interrupt_main()
+                else:
+                    # Unable to read line; assume stdin has been broken -
+                    # terminate.
+                    thread.interrupt_main()
+
+        self._thread = Thread(target=_watchStdin, name='StdinReader')
+        self._thread.setDaemon(True)
+        self._thread.start()
+
 
 class TempFile(object):
     unlink = os.unlink
@@ -33,6 +69,13 @@ class TempFile(object):
             pass
 
         self.unlink(self.name)
+
+
+class PutRequest(urllib2.Request):
+    """Subclass of urllib2.Request for HTTP 'PUT' requests."""
+
+    def get_method(self):
+        return 'PUT'
 
 
 class Task(object):
@@ -99,9 +142,9 @@ class TaskRunner(object):
 
     def log_result(self, result):
         if result == 0:
-            print >> sys.stderr, "OK"
+            log_progress("OK\n")
         else:
-            print >> sys.stderr, "Exit code %d" % result
+            log_progress("Exit code %d\n" % result)
 
     def run(self, task):
         """Run a task with a file descriptor corresponding to its log file"""
@@ -111,9 +154,9 @@ class TaskRunner(object):
             else:
                 command_to_print = task.command
 
-            print >> sys.stderr, "%s (%s) - " % (task.description, command_to_print),
+            log_progress("%s (%s) - " % (task.description, command_to_print))
             if task.privileged and os.getuid() != 0:
-                print >> sys.stderr, "skipped (needs root privs)"
+                log_progress("skipped (needs root privs)\n")
                 return
 
             if hasattr(task, 'log_file'):
@@ -128,14 +171,14 @@ class TaskRunner(object):
             fp.flush()
             self.log_result(result)
             for i in xrange(2, task.num_samples + 2):
-                print >> sys.stderr, "Taking sample %d after %f seconds - " % \
-                    (i, task.interval)
+                log_progress("Taking sample %d after %f seconds - " % \
+                    (i, task.interval))
                 time.sleep(task.interval)
                 result = task.execute(fp)
                 self.log_result(result)
         elif self.verbosity >= 2:
-            print >> sys.stderr, 'Skipping "%s" (%s): not for platform %s' \
-                % (task.description, command_to_print, sys.platform)
+            log_progress('Skipping "%s" (%s): not for platform %s\n' \
+                % (task.description, command_to_print, sys.platform))
 
     def zip(self, filename, node):
         """Write all our logs to a zipfile"""
@@ -148,6 +191,31 @@ class TaskRunner(object):
                          "cbcollect_info_%s_%s/%s" % (node, self.start_time, name))
         finally:
             zf.close()
+
+    def upload(self, zip_filename, url):
+        """Upload the zip file"""
+        result = {}
+        try:
+            f = open(zip_filename)
+            mm = mmap.mmap(f.fileno(), os.stat(f.name).st_size, access=mmap.ACCESS_READ)
+            opener = urllib2.build_opener(urllib2.HTTPHandler)
+            request = PutRequest(url, data=mm)
+            request.add_header('Content-Type', 'application/zip')
+            res = opener.open(request)
+            result['error'] = False
+        except urllib2.HTTPError, e:
+            result['error'] = True
+            result['details'] = ("HTTP error %s received from server: %s"
+                                 % (e.code, e.reason))
+        except urllib2.URLError, e:
+            result['error'] = True
+            result['details'] = ("%s. Please check the hostname is correct" +
+                                 " and ensure the system has access to" +
+                                 " that host.") % e.reason
+        mm.close()
+        f.close()
+        return result
+
 
 class SolarisTask(Task):
     platforms = ['sunos5', 'solaris']
@@ -408,9 +476,10 @@ def get_server_guts(initargs_path):
     args = [escript, dump_guts_path, "--initargs-path", initargs_path]
     if extra_args:
         args = args + extra_args.split(";")
-    print("Checking for server guts in %s..." % initargs_path)
-    p = subprocess.Popen(args, stdout = subprocess.PIPE)
+    log_progress("Checking for server guts in %s..." % initargs_path)
+    p = subprocess.Popen(args, stdout = subprocess.PIPE, stderr = subprocess.PIPE )
     output = p.stdout.read()
+    log_progress(p.stderr.read())
     p.wait()
     rc = p.returncode
     # print("args: %s gave rc: %d and:\n\n%s\n" % (args, rc, output))
@@ -481,19 +550,132 @@ def main():
                       action="store_true", default=False)
     parser.add_option("-d", action="callback", callback=dump_utilities,
                       help="dump a list of commands that cbcollect_info needs")
+    parser.add_option("-u","--upload", dest="upload", action="store_true",
+                      default=False, help="Enables upload mode."),
+    parser.add_option("-n", "--upload-host", dest="host",
+                      help="Mandatory when using --upload. Specifies the host where the logs should be uploaded to")
+    parser.add_option("-c", "--customer", dest="customer",
+                      help="Mandatory when using --upload. Specifies the customer that uploaded the logs")
+    parser.add_option("-t", "--ticket", dest="ticket",
+                      help="Optional when --upload is used. Specifies the ticket which the logs are related to")
+    parser.add_option("--script", dest="quiet", action="store_true", default=False)
+
     options, args = parser.parse_args()
+    global QUIET
+    QUIET = options.quiet
+    artifact = ""
+
+    def sigint_handler(signal, frame):
+        if QUIET:
+            status = 'cancelled'
+            details = 'Cancelled during collection'
+            if artifact:
+                script_output(status, details=details, artifact=artifact)
+            else:
+                script_output(status, details=details)
+        elif artifact:
+            log_progress('\nCancelled during upload\nLogs were suscessfully collected: ' + artifact)
+        else:
+            log_progress('\nCancelled by user Ctrl-c no logs were collected\n')
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
+
+    status = ""
+    details = ""
+    url = ""
+    if (options.upload):
+        if not options.host:
+            status = "badargs"
+            details += " --upload-host value."
+        if not options.customer:
+            status = "badargs"
+            details += " --customer value."
+
+        if status == "badargs":
+            if QUIET:
+                details = "Missing option(s):" + details
+                script_output(status, details=details)
+                sys.exit(2)
+            else:
+                parser.error("Missing option(s):" +details)
+        url = options.host
+        if '//' not in url:
+            url = '//' + url
+
+        if not re.search('^[A-Za-z0-9./:]+$', url):
+            status = "badargs"
+            details += " --upload-host not a valid hostname."
+        else:
+            (scheme, netloc, path, query, frag) = urlparse.urlsplit(url)
+
+            if not netloc:
+                status = "badargs"
+                details += " --upload-host not a valid hostname."
+
+            #Ensure that scheme is https
+            if scheme:
+                if not scheme == "https":
+                    status = "badargs"
+                    details += " --upload-host only https protocol is supported."
+            else:
+                scheme = "https"
+
+            if path:
+                status= "badargs"
+                details += " --upload-host not a valid hostname."
+
+        if not re.search('^[A-Za-z0-9_.-]{1,50}$', options.customer):
+            status = "badargs"
+            details += " --customer value should only contain the following characters [A-Za-z0-9_.-] with a maximum length of 50."
+
+        if options.ticket and not re.search('^\d{1,7}$', options.ticket):
+            status = "badargs"
+            details += " --ticket value should be a number with maxium length of 7."
+
+        if status == "badargs":
+            if QUIET:
+                details = "Bad option(s):" + details
+                script_output(status, details=details)
+                sys.exit(2)
+            else:
+                parser.error("Bad option(s):" + details)
+
+        #If all checks pass build the url
+        full_url = scheme + "://" + netloc + "/" + options.customer.lower()
+        if options.ticket:
+            full_url += "/" + options.ticket
+    else:
+        if options.host:
+            status = "badargs"
+            details += " --upload-host specified without --upload."
+        if options.customer:
+            status = "badargs"
+            details += " --customer specified without --upload."
+        if options.ticket:
+            status = "badargs"
+            details += " --ticket specified without --upload."
+        if status == "badargs":
+            if QUIET:
+                details = "Missing option:" + details
+                script_output(status, details=details)
+                sys.exit(2)
+            else:
+                parser.error("Missing option:" +details)
+
 
     if len(args) != 1:
         parser.error("incorrect number of arguments")
 
-    zip_filename = args[0]
-    if zip_filename[-4:] != '.zip':
-        zip_filename = zip_filename + '.zip'
+    zip_file_path = args[0]
+    if zip_file_path[-4:] != '.zip':
+        zip_file_path += '.zip'
 
-    zip_dir = os.path.dirname(os.path.abspath(zip_filename))
+    zip_dir = os.path.dirname(os.path.abspath(zip_file_path))
 
     if not os.access(zip_dir, os.W_OK | os.X_OK):
-        print("do not have write access to the directory %s" % (zip_dir))
+        log_progress("Error: Do not have write access to the directory %s\n" % (zip_dir))
         sys.exit(1)
 
     erldir = os.path.join(mydir, 'erlang', 'bin')
@@ -547,7 +729,31 @@ def main():
     if zip_node.split("@")[-1] == "127.0.0.1":
         zip_node = '@'.join(zip_node.split("@")[:-1] + [find_primary_addr("127.0.0.1")])
 
-    runner.zip(zip_filename, zip_node)
+    runner.zip(zip_file_path, zip_node)
+    zip_filename = os.path.basename(zip_file_path)
+    artifact = os.path.abspath(zip_file_path)
+    log_progress("Log collected successfully: %s\n" % artifact)
+    if not options.upload:
+        if QUIET:
+            script_output("collected", artifact=artifact)
+    else:
+        log_progress("Uploading to %s\n" % full_url)
+        full_url += "/" + zip_filename
+        result = runner.upload(zip_file_path, full_url)
+        if not result['error']:
+            artifact = full_url
+            log_progress("Upload completed\n")
+            if QUIET:
+                script_output("uploaded", artifact=artifact)
+            log_progress("Deleting file %s\n" % zip_file_path )
+            os.remove(zip_file_path)
+        else:
+            log_progress("Upload failed: %s\n" % result['details'])
+            if QUIET:
+                details = "Failed to upload to %s - %s" % (full_url, result['details'])
+                script_output("upload-failed", details=details, artifact=artifact)
+            sys.exit(3)
+    sys.exit(0)
 
 def find_primary_addr(default = None):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -561,5 +767,21 @@ def find_primary_addr(default = None):
     finally:
         s.close()
 
+def log_progress(message):
+    if QUIET:
+        global QUIET_OUTPUT
+        QUIET_OUTPUT += message
+    else:
+        print >> sys.stderr, message,
+
+def script_output(status, details = None, artifact = None):
+    print "status: " + status
+    if artifact:
+        print "artifact: " + artifact
+    if details:
+        print "details: " + details
+
+
 if __name__ == '__main__':
+    reader = StdinReader()
     main()
