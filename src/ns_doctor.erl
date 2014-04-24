@@ -301,6 +301,11 @@ maybe_refresh_tasks_version(State) ->
                                       erlang:phash2({warming_up,
                                                      lists:keyfind(bucket, 1, Task)}),
                                       Set0);
+                                collect_logs ->
+                                    sets:add_element(
+                                      erlang:phash2({collect_logs,
+                                                     lists:keyfind(status, 1, Task)}),
+                                      Set0);
                                 _ ->
                                     Set0
                             end
