@@ -487,6 +487,7 @@ grab_collect_logs_task() ->
                                end,
                     [[{type, collect_logs},
                       {status, running},
+                      {recommendedRefreshPeriod, 1},
                       proplists:lookup(last_updated, CollectStatus),
                       {progress, Progress},
                       {perNode, [{struct, N} || N <- Nodes]}]]
