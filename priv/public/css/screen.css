@@ -1408,8 +1408,8 @@ input[type=number].size {width:4em;}
 .bucket-io-priority a {margin-left: 60px;}
 
 .collect_information_dialog {font-size: 13px;}
-.collect_information_dialog .content {padding: 0 36px 20px;}
-.collect_information_dialog .content p {padding-bottom: 5px;}
+.collect_information_dialog .content {padding: 0 14px 20px;}
+.collect_information_dialog .content p {padding: 10px 0px;}
 .collect_information_dialog h2 {margin-top: 15px;}
 .collect_information_dialog .collect_from {padding-left: 20px; padding-top: 5px; line-height: 30px;}
 .collect_information_dialog .collect_from input {vertical-align: middle; margin-right: 5px;}
@@ -1428,6 +1428,7 @@ input[type=number].size {width:4em;}
 .collect_information_dialog .dynamic_input_error {border-color: red;}
 .collect_information_dialog input[type="text"] {width: 195px;}
 
+.collection_status {font-size: 14px;}
 .collection_status.spinner {padding-top: 35px;}
 
 .collect_result_dialog table td {text-align: left;}
@@ -1442,7 +1443,8 @@ input[type=number].size {width:4em;}
 .collect_result_dialog .dynamic_uploaded,
 .collect_result_dialog .green  {color: green;}
 .collect_result_dialog .save_cancel {margin-top: 0;}
-.collect_result_dialog .result {background-color: #f6f6f7; padding: 5px; line-height: 16px;}
+.collect_result_dialog .result {background-color: #f6f6f7; padding: 5px; line-height: 13px;}
+.collect_result_dialog .result div {padding: 2px 0;}
 
 .logs .tabs {float: left;}
 .logs .header_2 .btn_1{float: right; display: block; margin-left: 5px;}

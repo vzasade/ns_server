@@ -768,61 +768,86 @@
           </table>
         </script>
 
-        <script id="js_collect_info_row_template" type="text/html">
-          {% _.each(rows, function (row) { %}
-            <tr>
-              <td class="ellipsis" title="{%= h(row.node_name) %}">
-                {%= h(row.node_name) %}
-              </td>
-              <td class="dynamic_{%= row.result %}">
-                {%= h(row.humanStatus) %}
-              </td>
-              <td>
-                {%= row.details && row.details.length ? h(row.details) : '' %}
-              </td>
-            </tr>
-          {% }); %}
-        </script>
         <script id="js_collect_progress_template" type="text/html">
-          <div id="js_collection_status" class="collection_status {%= isCompleted ? '' : 'spinner' %}" style="height:50px;line-height:50px;">
+          <div id="js_collection_status" class="collection_status {%= isCompleted ? 'green' : 'spinner' %}" style="height:50px;line-height:50px;">
             <span>{%= isCompleted ? 'Collection complete.' : 'Collection in progress...' %}</span>
           </div>
-          {% if (uploadedNodes.length) { %}
+          {% if (nodesByStatus.in_progress) { %}
+            <div>
+              <p>In progress:</p>
+              <div class="js_result result">
+                {% _.each(nodesByStatus.in_progress, function (node) { %}
+                  <div>{%= h(node.node_name) %}</div>
+                {% }); %}
+              </div>
+            </div>
+          {% } %}
+          {% if (nodesByStatus.pending) { %}
+            <div>
+              <p>Pending:</p>
+              <div class="js_result result">
+                {% _.each(nodesByStatus.pending, function (node) { %}
+                  <div>{%= h(node.node_name) %}</div>
+                {% }); %}
+              </div>
+            </div>
+          {% } %}
+          {% if (nodesByStatus.uploaded) { %}
             <div>
               <p class="green">Logs were successfully uploaded to the following URLs:</p>
               <div class="js_result result">
-                {% _.each(uploadedNodes, function (node) { %}
+                {% _.each(nodesByStatus.uploaded, function (node) { %}
                   <div>{%= h(node.artifact) %}</div>
                 {% }); %}
               </div>
             </div>
           {% } %}
-          {% if (collectedNodes.length) { %}
+          {% if (nodesByStatus.collected) { %}
             <div>
-              <p>Logs were successfully collected to the following paths:</p>
+              <p class="green">Logs were successfully collected to the following paths:</p>
               <div class="js_result result">
-                {% _.each(collectedNodes, function (node) { %}
-                  <div>{%= h(node.node_name) %}: {%= h(node.artifact) %}</div>
+                {% _.each(nodesByStatus.collected, function (node) { %}
+                  <div><strong>{%= h(node.node_name) %}:</strong> {%= h(node.artifact) %}</div>
                 {% }); %}
               </div>
             </div>
           {% } %}
-          {% if (uploadFailedNodes.length) { %}
+          {% if (nodesByStatus["upload-failed"]) { %}
             <div>
               <p class="red">Warning: The following logs were successfully collected but failed to upload. Please manually upload from the following locations:</p>
               <div class="js_result result">
-                {% _.each(uploadFailedNodes, function (node) { %}
-                  <div>{%= h(node.node_name) %}: {%= h(node.artifact) %}</div>
+                {% _.each(nodesByStatus["upload-failed"], function (node) { %}
+                  <div><strong>{%= h(node.node_name) %}:</strong> {%= h(node.artifact) %}</div>
                 {% }); %}
               </div>
             </div>
           {% } %}
-          {% if (errorNodes.length) { %}
+          {% if (nodesByStatus.failed) { %}
             <div>
               <p class="red">Error: Unable to collect logs from the following nodes:</p>
               <div class="js_result result">
-                {% _.each(errorNodes, function (node) { %}
+                {% _.each(nodesByStatus.failed, function (node) { %}
                   <div>{%= h(node.node_name) %}</div>
+                {% }); %}
+              </div>
+            </div>
+          {% } %}
+          {% if (nodesByStatus.cancelled) { %}
+            <div>
+              <p class="red">Cancelled Nodes:</p>
+              <div class="js_result result">
+                {% _.each(nodesByStatus.cancelled, function (node) { %}
+                  <div>{%= h(node.node_name) %}</div>
+                {% }); %}
+              </div>
+            </div>
+          {% } %}
+          {% if (details.length) { %}
+            <div>
+              <p class="red">Node Errors:</p>
+              <div class="js_result result">
+                {% _.each(details, function (node) { %}
+                  <div><strong>{%= h(node.node_name) %}:</strong> {%= h(node.details) %}</div>
                 {% }); %}
               </div>
             </div>
@@ -844,7 +869,6 @@
 
                 <a id="js_start_new_info"  class="btn_1"><span>Start New Collection</span></a>
                 <a id="js_cancel_collect_info"  class="btn_1"><span>Cancel Collection</span></a>
-                <a id="js_collect_progress_container_btn" class="btn_1"><span>Show/Hide Result</span></a>
                 <a id="js_previous_result_btn" class="btn_1"><span>Previous Result</span></a>
               </div>
               <div class="panes clearfix">
@@ -900,19 +924,6 @@
                     </form>
                   </div>
                   <div class="collect_result_dialog collect_information_dialog" id="js_collect_result_view">
-                    <table class="list" style="width:100%;">
-                      <colgroup>
-                        <col class="node">
-                        <col class="result">
-                        <col class="details">
-                      </colgroup>
-                      <thead>
-                        <th>Node</th>
-                        <th>Result</th>
-                        <th>Details</th>
-                      </thead>
-                      <tbody id="js_collect_info_row_container"></tbody>
-                    </table>
                     <div class="content" id="js_collect_progress_container">
                     </div>
                   </div>

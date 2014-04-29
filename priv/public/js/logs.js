@@ -85,30 +85,18 @@ var LogsSection = {
     var startNewCollectBtn = $("#js_start_new_info");
     var collectInfoWrapper = $("#js_collect_information");
     var collectResultView = $("#js_collect_result_view");
-    var collectResultDetailsBtn = $("#js_collect_progress_container_btn");
-    var collectResultDetailsCont = $("#js_collect_progress_container");
     var collectResultSectionSpinner = $("#js_collect_info_spinner");
     var showResultViewBtn = $("#js_previous_result_btn");
 
     var collectInfoViewNameCell = new StringHashFragmentCell("collectInfoViewName");
-    var collectInfoResultDetailsCell = new StringHashFragmentCell("collectInfoResultDetails");
 
     var allActiveNodeBoxes;
     var overlay;
     var self = this;
 
     collectResultSectionSpinner.show();
-    collectResultDetailsCont.hide();
     collectResultView.hide();
     collectInfoStartNewView.hide();
-
-    collectResultDetailsBtn.click(function () {
-      collectInfoResultDetailsCell.setValue(collectInfoResultDetailsCell.value !== "true");
-    });
-
-    collectInfoResultDetailsCell.subscribeValue(function (showOrHide) {
-      collectResultDetailsCont.toggle(showOrHide === "true");
-    });
 
     self.tabs = new TabsCell('logsTabs', '#js_logs .tabs', '#js_logs .panes > div', ['logs', 'collection_info']);
 
@@ -205,27 +193,6 @@ var LogsSection = {
       return data;
     }
 
-    function humanStatusMessage(node) {
-      switch (node.result) {
-        case "pending":
-          return "Pending";
-        case "in_progress":
-          return "Collection in progress...";
-        case "collected":
-          return "Collected";
-        case "uploaded":
-          return "Uploaded";
-        case "upload-failed":
-          return "Collected, failed to upload";
-        case "failed":
-          return "Collection failed";
-        case "cancelled":
-          return "Cancelled";
-        default:
-          return "";
-      }
-    }
-
     function showErrors(key, value) {
       $("#js_" + key + "_error").text(value).show();
       $("#js_" + key + "_input").addClass("dynamic_input_error");
@@ -243,17 +210,16 @@ var LogsSection = {
     function hideResultButtons() {
       startNewCollectBtn.hide();
       cancelCollectBtn.hide();
-      collectResultDetailsBtn.hide();
     }
 
     function switchCollectionInfoView(isResultView, isCurrentlyRunning, isRunBefore) {
       if (isResultView) {
         collectInfoStartNewView.hide();
         collectResultView.show();
-        collectResultDetailsBtn.show();
         showResultViewBtn.hide();
         cancelCollectBtn.toggle(isCurrentlyRunning);
         startNewCollectBtn.toggle(!isCurrentlyRunning);
+        collectForm[0].reset();
       } else {
         collectInfoStartNewView.show();
         collectResultView.hide();
@@ -263,27 +229,17 @@ var LogsSection = {
       }
     }
 
-    function filterNodesByResult(tasks, status) {
-      return _.filter(tasks.perNode, function (node) {
-        return node.result === status;
-      });
-    }
-
     function renderResultView(collectionInfo) {
-      _.each(collectionInfo.perNode, function (node) {
-        node.humanStatus = humanStatusMessage(node);
-      });
-
-      renderTemplate('js_collect_info_row', {
-        rows: collectionInfo.perNode
-      });
-      renderTemplate('js_collect_progress', {
+      var templateData = {
+        nodesByStatus: _.groupBy(collectionInfo.perNode, 'result'),
         isCompleted: collectionInfo.status === "idle",
-        uploadedNodes: filterNodesByResult(collectionInfo, "uploaded"),
-        collectedNodes: filterNodesByResult(collectionInfo, "collected"),
-        uploadFailedNodes: filterNodesByResult(collectionInfo, "upload-failed"),
-        errorNodes: filterNodesByResult(collectionInfo, "failed")
-      });
+        details: _.filter(collectionInfo.perNode, function (node) {
+          return node.details && node.details.length;
+        })
+      }
+      console.log(templateData)
+
+      renderTemplate('js_collect_progress', templateData);
     }
 
     function renderStartNewView() {
@@ -319,7 +275,7 @@ var LogsSection = {
             collectInfoViewNameCell.setValue("startNew");
           }
         } else {
-          var defaultTabName = collectionInfo.perNode.length ? "result": "startNew";
+          var defaultTabName = isRunBefore ? "result": "startNew";
           collectInfoViewNameCell.setValue(defaultTabName);
         }
       }
