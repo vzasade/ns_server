@@ -118,6 +118,9 @@ var LogsSection = {
     });
 
     cancelCollectBtn.click(function (e) {
+      if (cancelCollectBtn.hasClass('dynamic_disabled')) {
+        return;
+      }
       e.preventDefault();
 
       showDialog(cancelConfiramationDialog, {
@@ -127,7 +130,10 @@ var LogsSection = {
           $.ajax({
             url: '/collectLogs/cancel',
             type: "POST",
-            success: recalculateTasksUri,
+            success: function () {
+              recalculateTasksUri();
+              cancelCollectBtn.addClass('dynamic_disabled');
+            },
             error: recalculateTasksUri
           });
 
@@ -276,6 +282,7 @@ var LogsSection = {
       var isRunBefore = !!collectionInfo.perNode.length;
       var isResultView = tabName === 'result';
 
+      !isCurrentlyRunning && cancelCollectBtn.removeClass('dynamic_disabled');
 
       if (isCurrentlyRunning) {
         collectInfoViewNameCell.setValue("result");
