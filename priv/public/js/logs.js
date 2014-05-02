@@ -87,6 +87,7 @@ var LogsSection = {
     var collectResultView = $("#js_collect_result_view");
     var collectResultSectionSpinner = $("#js_collect_info_spinner");
     var showResultViewBtn = $("#js_previous_result_btn");
+    var cancelConfiramationDialog = $("#js_cancel_collection_confirmation_dialog");
 
     var collectInfoViewNameCell = new StringHashFragmentCell("collectInfoViewName");
 
@@ -118,12 +119,22 @@ var LogsSection = {
 
     cancelCollectBtn.click(function (e) {
       e.preventDefault();
-      $.ajax({
-        url: '/collectLogs/cancel',
-        type: "POST",
-        success: recalculateTasksUri,
-        error: recalculateTasksUri
+
+      showDialog(cancelConfiramationDialog, {
+        eventBindings: [['.save_button', 'click', function (e) {
+
+          e.preventDefault();
+          $.ajax({
+            url: '/collectLogs/cancel',
+            type: "POST",
+            success: recalculateTasksUri,
+            error: recalculateTasksUri
+          });
+
+          hideDialog(cancelConfiramationDialog);
+        }]]
       });
+
     });
     startNewCollectBtn.click(function (e) {
       e.preventDefault();
@@ -236,8 +247,7 @@ var LogsSection = {
         details: _.filter(collectionInfo.perNode, function (node) {
           return node.details && node.details.length;
         })
-      }
-      console.log(templateData)
+      };
 
       renderTemplate('js_collect_progress', templateData);
     }

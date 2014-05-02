@@ -868,7 +868,7 @@
                 </ul>
 
                 <a id="js_start_new_info"  class="btn_1"><span>Start New Collection</span></a>
-                <a id="js_cancel_collect_info"  class="btn_1"><span>Cancel Collection</span></a>
+                <a id="js_cancel_collect_info"  class="btn_1"><span>Stop Collection</span></a>
                 <a id="js_previous_result_btn" class="btn_1"><span>Previous Result</span></a>
               </div>
               <div class="panes clearfix">
@@ -2494,6 +2494,23 @@
   </form>
   <!-- END join cluster -->
 </div>
+
+
+<div class="dialog" id="js_cancel_collection_confirmation_dialog" title="Confirm Log Connection Stop">
+  <div class="content">
+    <div class="pas_20">
+      <div class="warning pat_20">
+        <strong>Warning</strong> - Are you sure you want to stop log collection?
+      </div>
+    </div>
+    <div class="right save_cancel pas_20 footer_bg">
+      <button type="submit" class="save_button float_right">Stop</button>
+      <a class="close cancel_button float_right">Cancel</a>
+    </div>
+  </div>
+</div>
+
+
 <!--  eject confirmation dialog -->
 <div class="dialog" id="eject_confirmation_dialog" title="Confirm Server Removal">
   <div class="lbox">
