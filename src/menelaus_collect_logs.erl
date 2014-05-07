@@ -37,13 +37,38 @@
 
 %% Handles collectLogs/start POST request (i.e. start log collection).
 handle_collect_logs_start(Req) ->
+    case is_collect_logs_allowed() of
+        false ->
+            menelaus_util:reply_json(Req, [], 403);
+        true ->
+            do_collect_logs_start(Req)
+    end.
+
+
+%% Handles collectLogs/cancel POST request (i.e. cancel log collection).
+handle_collect_logs_cancel(Req) ->
+    case is_collect_logs_allowed() of
+        false ->
+            menelaus_util:reply_json(Req, [], 403);
+        true ->
+            case collect_logs_manager:cancel_collection() of
+                ok -> menelaus_util:reply_json(Req, [], 200);
+                _  -> menelaus_util:reply_json(Req, [], 400)
+            end
+    end.
+
+%% ====================================================================
+%% Internal functions
+%% ====================================================================
+
+do_collect_logs_start(Req) ->
     Config = ns_config:get(),
     JSON = menelaus_util:parse_json(Req),
     ValidateOnly = proplists:get_value("just_validate", Req:parse_qs()) =:= "1",
     ErrorReturnCode = case ValidateOnly of
-        true  -> 200;
-        false -> 400
-    end,
+                          true  -> 200;
+                          false -> 400
+                      end,
     try parse_validate_collect_logs_start(Config, JSON) of
         {ok, [{nodes, Nodes}, {upload, Upload}] = Args} when ValidateOnly =:= false ->
             ?log_info("handle_collect_logs_post OK: ~p~n", [Args] ),
@@ -54,20 +79,9 @@ handle_collect_logs_start(Req) ->
         {ok, _Args} when ValidateOnly ->
             menelaus_util:reply_json(Req, {struct, [{errors, null}]}, 200)
     catch throw:{collect_logs_parse_error, Errors} ->
-            menelaus_util:reply_json(Req, {struct, [{errors, Errors}]},
-                                     ErrorReturnCode)
+        menelaus_util:reply_json(Req, {struct, [{errors, Errors}]},
+            ErrorReturnCode)
     end.
-
-%% Handles collectLogs/cancel POST request (i.e. cancel log collection).
-handle_collect_logs_cancel(Req) ->
-    case collect_logs_manager:cancel_collection() of
-        ok -> menelaus_util:reply_json(Req, [], 200);
-        _  -> menelaus_util:reply_json(Req, [], 400)
-    end.
-
-%% ====================================================================
-%% Internal functions
-%% ====================================================================
 
 format_reply(in_progress) ->
     {200, []};
@@ -234,6 +248,9 @@ validate_single_node(NodesSet, N) ->
         false ->
             erlang:throw(collect_logs_parse_error)
     end.
+
+is_collect_logs_allowed() ->
+    menelaus_web:is_enterprise() andalso cluster_compat_mode:is_cluster_30().
 
 %%
 %% Tests
