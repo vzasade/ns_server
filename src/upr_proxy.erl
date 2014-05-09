@@ -163,9 +163,11 @@ maybe_connect(State) ->
     State.
 
 connect(Type, ConnName, Node, Bucket) ->
-    {Username, Password} = ns_bucket:credentials(Bucket),
+    Config = ns_config:get(),
+    Username = ns_config:search_node_prop(Node, Config, memcached, admin_user),
+    Password = ns_config:search_node_prop(Node, Config, memcached, admin_pass),
 
-    Sock = mc_replication:connect(ns_memcached:host_port(Node), Username, Password),
+    Sock = mc_replication:connect({ns_memcached:host_port(Node), Username, Password, Bucket}),
     ok = upr_commands:open_connection(Sock, ConnName, Type),
     Sock.
 
