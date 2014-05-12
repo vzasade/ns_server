@@ -862,18 +862,18 @@
           <div class="shadow_box">
             <div class="section">
               <div class="header_2">
-                <ul class="tabs">
+                <ul class="tabs when-enterprise">
                   <li class="tab_left"><a>Logs</a></li>
                   <li class="tab_right"><a>Collect Information</a></li>
                 </ul>
-
+                <a href="diag" target="_blank" class="when-community btn_1 when-roadmin-hide-me"><span>Generate Diagnostic Report</span></a>
                 <a id="js_start_new_info"  class="btn_1"><span>Start New Collection</span></a>
                 <a id="js_cancel_collect_info"  class="btn_1"><span>Stop Collection</span></a>
                 <a id="js_previous_result_btn" class="btn_1"><span>Previous Result</span></a>
               </div>
               <div class="panes clearfix">
                 <div id="logs_container"></div>
-                <div id="js_collect_information">
+                <div id="js_collect_information" class="when-enterprise">
                   <div class="collect_information_dialog" id="js_collect_info_start_new_view">
                     <form id="js_collect_info_form">
                       <div class="content">
