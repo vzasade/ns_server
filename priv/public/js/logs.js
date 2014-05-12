@@ -14,7 +14,7 @@
    limitations under the License.
  **/
 
-function createLogsSectionCells (ns, modeCell, stalenessCell, tasksProgressCell, logsSectionTabs, serversCell, isEnterpriseCell) {
+function createLogsSectionCells (ns, modeCell, stalenessCell, tasksProgressCell, logsSectionTabs, serversCell, isEnterpriseCell, isROAdminCell) {
   ns.activeTabCell = Cell.needing(modeCell).compute(function (v, mode) {
     return (mode === "log") || undefined;
   }).name('activeTabCell');
@@ -38,7 +38,11 @@ function createLogsSectionCells (ns, modeCell, stalenessCell, tasksProgressCell,
   }).name('massagedLogsCell');
 
   ns.isCollectionInfoTabCell = Cell.compute(function (v) {
-    return v.need(logsSectionTabs) === "collection_info" && v.need(ns.activeTabCell) && v.need(isEnterpriseCell);
+    return v.need(logsSectionTabs) === "collection_info" &&
+           v.need(ns.activeTabCell) &&
+           v.need(isEnterpriseCell) &&
+           !v.need(isROAdminCell);
+
   }).name("isClusterTabCell");
   ns.isCollectionInfoTabCell.equality = _.isEqual;
 
@@ -108,7 +112,8 @@ var LogsSection = {
       DAL.cells.tasksProgressCell,
       LogsSection.tabs,
       DAL.cells.serversCell,
-      DAL.cells.isEnterpriseCell
+      DAL.cells.isEnterpriseCell,
+      DAL.cells.isROAdminCell
     );
 
     renderCellTemplate(self.massagedLogsCell, 'logs', {
