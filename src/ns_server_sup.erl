@@ -52,154 +52,156 @@ pre_start() ->
 child_specs() ->
     [{setup_babysitter_node,
       {ns_server, setup_babysitter_node, []},
-      transient, brutal_kill, worker, []},
+      transient, brutal_kill, worker, []}] ++
 
-     {diag_handler_worker, {work_queue, start_link, [diag_handler_worker]},
-      permanent, 1000, worker, []},
+        ns_disksup:get_spec() ++
 
-     {dir_size, {dir_size, start_link, []},
-      permanent, 1000, worker, [dir_size]},
+        [{diag_handler_worker, {work_queue, start_link, [diag_handler_worker]},
+          permanent, 1000, worker, []},
 
-     {request_throttler, {request_throttler, start_link, []},
-      permanent, 1000, worker, [request_throttler]},
+         {dir_size, {dir_size, start_link, []},
+          permanent, 1000, worker, [dir_size]},
 
-     %% ns_log starts after ns_config because it needs the config to
-     %% find where to persist the logs
-     {ns_log, {ns_log, start_link, []},
-      permanent, 1000, worker, [ns_log]},
+         {request_throttler, {request_throttler, start_link, []},
+          permanent, 1000, worker, [request_throttler]},
 
-     {ns_crash_log_consumer, {ns_log, start_link_crash_consumer, []},
-      {permanent, 4}, 1000, worker, []},
+         %% ns_log starts after ns_config because it needs the config to
+         %% find where to persist the logs
+         {ns_log, {ns_log, start_link, []},
+          permanent, 1000, worker, [ns_log]},
 
-     %% Track bucket configs and ensure isasl is sync'd up
-     {ns_config_isasl_sync, {ns_config_isasl_sync, start_link, []},
-      permanent, 1000, worker, []},
+         {ns_crash_log_consumer, {ns_log, start_link_crash_consumer, []},
+          {permanent, 4}, 1000, worker, []},
 
-     {ns_log_events, {gen_event, start_link, [{local, ns_log_events}]},
-      permanent, 1000, worker, dynamic},
+         %% Track bucket configs and ensure isasl is sync'd up
+         {ns_config_isasl_sync, {ns_config_isasl_sync, start_link, []},
+          permanent, 1000, worker, []},
 
-     {ns_node_disco_sup, {ns_node_disco_sup, start_link, []},
-      permanent, infinity, supervisor,
-      [ns_node_disco_sup]},
+         {ns_log_events, {gen_event, start_link, [{local, ns_log_events}]},
+          permanent, 1000, worker, dynamic},
 
-     {vbucket_map_mirror, {vbucket_map_mirror, start_link, []},
-      permanent, brutal_kill, worker, []},
+         {ns_node_disco_sup, {ns_node_disco_sup, start_link, []},
+          permanent, infinity, supervisor,
+          [ns_node_disco_sup]},
 
-     {bucket_info_cache, {bucket_info_cache, start_link, []},
-      permanent, brutal_kill, worker, []},
+         {vbucket_map_mirror, {vbucket_map_mirror, start_link, []},
+          permanent, brutal_kill, worker, []},
 
-     %% Start ns_tick_event before mb_master as auto_failover needs it
-     {ns_tick_event, {gen_event, start_link, [{local, ns_tick_event}]},
-      permanent, 1000, worker, dynamic},
+         {bucket_info_cache, {bucket_info_cache, start_link, []},
+          permanent, brutal_kill, worker, []},
 
-     {buckets_events, {gen_event, start_link, [{local, buckets_events}]},
-      permanent, 1000, worker, dynamic},
+         %% Start ns_tick_event before mb_master as auto_failover needs it
+         {ns_tick_event, {gen_event, start_link, [{local, ns_tick_event}]},
+          permanent, 1000, worker, dynamic},
 
-     {ns_mail_sup, {ns_mail_sup, start_link, []},
-      permanent, infinity, supervisor, [ns_mail_sup]},
+         {buckets_events, {gen_event, start_link, [{local, buckets_events}]},
+          permanent, 1000, worker, dynamic},
 
-     {ns_stats_event, {gen_event, start_link, [{local, ns_stats_event}]},
-      permanent, 1000, worker, dynamic},
+         {ns_mail_sup, {ns_mail_sup, start_link, []},
+          permanent, infinity, supervisor, [ns_mail_sup]},
 
-     {samples_loader_tasks, {samples_loader_tasks, start_link, []},
-      permanent, 1000, worker, []},
+         {ns_stats_event, {gen_event, start_link, [{local, ns_stats_event}]},
+          permanent, 1000, worker, dynamic},
 
-     {ns_heart_sup, {ns_heart_sup, start_link, []},
-      permanent, infinity, supervisor, [ns_heart_sup]},
+         {samples_loader_tasks, {samples_loader_tasks, start_link, []},
+          permanent, 1000, worker, []},
 
-     {ns_doctor, {ns_doctor, start_link, []},
-      permanent, 1000, worker, [ns_doctor]},
+         {ns_heart_sup, {ns_heart_sup, start_link, []},
+          permanent, infinity, supervisor, [ns_heart_sup]},
 
-     {remote_clusters_info, {remote_clusters_info, start_link, []},
-      permanent, 1000, worker, [remote_servers_info]},
+         {ns_doctor, {ns_doctor, start_link, []},
+          permanent, 1000, worker, [ns_doctor]},
 
-     {master_activity_events, {gen_event, start_link, [{local, master_activity_events}]},
-      permanent, brutal_kill, worker, dynamic},
+         {remote_clusters_info, {remote_clusters_info, start_link, []},
+          permanent, 1000, worker, [remote_servers_info]},
 
-     %% Starts mb_master_sup, which has all processes that start on the master
-     %% node.
-     {mb_master, {mb_master, start_link, []},
-      permanent, infinity, supervisor, [mb_master]},
+         {master_activity_events, {gen_event, start_link, [{local, master_activity_events}]},
+          permanent, brutal_kill, worker, dynamic},
 
-     {master_activity_events_ingress, {gen_event, start_link, [{local, master_activity_events_ingress}]},
-      permanent, brutal_kill, worker, dynamic},
+         %% Starts mb_master_sup, which has all processes that start on the master
+         %% node.
+         {mb_master, {mb_master, start_link, []},
+          permanent, infinity, supervisor, [mb_master]},
 
-     {master_activity_events_timestamper, {master_activity_events, start_link_timestamper, []},
-      permanent, brutal_kill, worker, dynamic},
+         {master_activity_events_ingress, {gen_event, start_link, [{local, master_activity_events_ingress}]},
+          permanent, brutal_kill, worker, dynamic},
 
-     {master_activity_events_pids_watcher, {master_activity_events_pids_watcher, start_link, []},
-      permanent, brutal_kill, worker, dynamic},
+         {master_activity_events_timestamper, {master_activity_events, start_link_timestamper, []},
+          permanent, brutal_kill, worker, dynamic},
 
-     {master_activity_events_keeper, {master_activity_events_keeper, start_link, []},
-      permanent, brutal_kill, worker, dynamic},
+         {master_activity_events_pids_watcher, {master_activity_events_pids_watcher, start_link, []},
+          permanent, brutal_kill, worker, dynamic},
 
-     {menelaus, {menelaus_sup, start_link, []},
-      permanent, infinity, supervisor,
-      [menelaus_sup]},
+         {master_activity_events_keeper, {master_activity_events_keeper, start_link, []},
+          permanent, brutal_kill, worker, dynamic},
 
-     {mc_sup, {mc_sup, start_link, []},
-      permanent, infinity, supervisor, dynamic},
+         {menelaus, {menelaus_sup, start_link, []},
+          permanent, infinity, supervisor,
+          [menelaus_sup]},
 
-     %% Note: cert and private key files are set up as part of
-     %% menelaus_sup. So ns_ports_setup needs to go after it.
-     {ns_ports_setup, {ns_ports_setup, start, []},
-      {permanent, 4}, brutal_kill, worker, []},
+         {mc_sup, {mc_sup, start_link, []},
+          permanent, infinity, supervisor, dynamic},
 
-     {ns_port_memcached_killer, {ns_ports_setup, start_memcached_force_killer, []},
-      permanent, brutal_kill, worker, []},
+         %% Note: cert and private key files are set up as part of
+         %% menelaus_sup. So ns_ports_setup needs to go after it.
+         {ns_ports_setup, {ns_ports_setup, start, []},
+          {permanent, 4}, brutal_kill, worker, []},
 
-     {ns_memcached_log_rotator, {ns_memcached_log_rotator, start_link, []},
-      permanent, 1000, worker, [ns_memcached_log_rotator]},
+         {ns_port_memcached_killer, {ns_ports_setup, start_memcached_force_killer, []},
+          permanent, brutal_kill, worker, []},
 
-     {memcached_clients_pool, {memcached_clients_pool, start_link, []},
-      permanent, 1000, worker, []},
+         {ns_memcached_log_rotator, {ns_memcached_log_rotator, start_link, []},
+          permanent, 1000, worker, [ns_memcached_log_rotator]},
 
-     {proxied_memcached_clients_pool, {proxied_memcached_clients_pool, start_link, []},
-      permanent, 1000, worker, []},
+         {memcached_clients_pool, {memcached_clients_pool, start_link, []},
+          permanent, 1000, worker, []},
 
-     {xdc_lhttpc_pool, {lhttpc_manager, start_link, [[{name, xdc_lhttpc_pool}, {connection_timeout, 120000}, {pool_size, 200}]]},
-      permanent, 10000, worker, [lhttpc_manager]},
+         {proxied_memcached_clients_pool, {proxied_memcached_clients_pool, start_link, []},
+          permanent, 1000, worker, []},
 
-     {ns_null_connection_pool, {ns_null_connection_pool, start_link, [ns_null_connection_pool]},
-      permanent, 1000, worker, []},
+         {xdc_lhttpc_pool, {lhttpc_manager, start_link, [[{name, xdc_lhttpc_pool}, {connection_timeout, 120000}, {pool_size, 200}]]},
+          permanent, 10000, worker, [lhttpc_manager]},
 
-     %% per-vbucket replication supervisor, required by XDC manager
-     {xdc_replication_sup,
-      {xdc_replication_sup, start_link, []},
-      permanent, infinity, supervisor, [xdc_replication_sup]},
+         {ns_null_connection_pool, {ns_null_connection_pool, start_link, [ns_null_connection_pool]},
+          permanent, 1000, worker, []},
 
-     %% XDC replication manager
-     %% per-bucket supervisor needs xdc_rep_manager. In fact any couch
-     %% replication requires xdc_rep_manager to be started, because it
-     %% relies on some public ETS tables.
-     {xdc_rep_manager,
-      {xdc_rep_manager, start_link, []},
-      permanent, 30000, worker, []},
+         %% per-vbucket replication supervisor, required by XDC manager
+         {xdc_replication_sup,
+          {xdc_replication_sup, start_link, []},
+          permanent, infinity, supervisor, [xdc_replication_sup]},
 
-     {ns_memcached_sockets_pool, {ns_memcached_sockets_pool, start_link, []},
-      permanent, 1000, worker, []},
+         %% XDC replication manager
+         %% per-bucket supervisor needs xdc_rep_manager. In fact any couch
+         %% replication requires xdc_rep_manager to be started, because it
+         %% relies on some public ETS tables.
+         {xdc_rep_manager,
+          {xdc_rep_manager, start_link, []},
+          permanent, 30000, worker, []},
 
-     {xdcr_upr_sockets_pool, {xdcr_upr_sockets_pool, start_link, []},
-      permanent, 1000, worker, []},
+         {ns_memcached_sockets_pool, {ns_memcached_sockets_pool, start_link, []},
+          permanent, 1000, worker, []},
 
-     {ns_bucket_worker_sup, {ns_bucket_worker_sup, start_link, []},
-      permanent, infinity, supervisor, [ns_bucket_worker_sup]},
+         {xdcr_upr_sockets_pool, {xdcr_upr_sockets_pool, start_link, []},
+          permanent, 1000, worker, []},
 
-     {system_stats_collector, {system_stats_collector, start_link, []},
-      permanent, 1000, worker, [system_stats_collector]},
+         {ns_bucket_worker_sup, {ns_bucket_worker_sup, start_link, []},
+          permanent, infinity, supervisor, [ns_bucket_worker_sup]},
 
-     {{stats_archiver, "@system"}, {stats_archiver, start_link, ["@system"]},
-      permanent, 1000, worker, [stats_archiver]},
+         {system_stats_collector, {system_stats_collector, start_link, []},
+          permanent, 1000, worker, [system_stats_collector]},
 
-     {{stats_reader, "@system"}, {stats_reader, start_link, ["@system"]},
-      permanent, 1000, worker, [start_reader]},
+         {{stats_archiver, "@system"}, {stats_archiver, start_link, ["@system"]},
+          permanent, 1000, worker, [stats_archiver]},
 
-     {compaction_daemon, {compaction_daemon, start_link, []},
-      {permanent, 4}, 86400000, worker, [compaction_daemon]},
+         {{stats_reader, "@system"}, {stats_reader, start_link, ["@system"]},
+          permanent, 1000, worker, [start_reader]},
 
-     {xdc_rdoc_replication_srv, {xdc_rdoc_replication_srv, start_link, []},
-      permanent, 1000, worker, [xdc_rdoc_replication_srv]},
+         {compaction_daemon, {compaction_daemon, start_link, []},
+          {permanent, 4}, 86400000, worker, [compaction_daemon]},
 
-     {set_view_update_daemon, {set_view_update_daemon, start_link, []},
-      permanent, 1000, worker, [set_view_update_daemon]}
-].
+         {xdc_rdoc_replication_srv, {xdc_rdoc_replication_srv, start_link, []},
+          permanent, 1000, worker, [xdc_rdoc_replication_srv]},
+
+         {set_view_update_daemon, {set_view_update_daemon, start_link, []},
+          permanent, 1000, worker, [set_view_update_daemon]}
+        ].
