@@ -68,7 +68,9 @@
          get_random_key/1,
          compact_vbucket/5,
          wait_for_seqno_persistence/3,
-         vbucket_state_to_atom/1
+         vbucket_state_to_atom/1,
+         get_ctrl_token/1,
+         set_ctrl_token/3
         ]).
 
 -type recv_callback() :: fun((_, _, _) -> any()) | undefined.
@@ -92,7 +94,7 @@
                      ?RPREPENDQ | ?RDELETE | ?RDELETEQ | ?RINCR | ?RINCRQ |
                      ?RDECR | ?RDECRQ | ?SYNC | ?CMD_CHECKPOINT_PERSISTENCE |
                      ?CMD_SEQNO_PERSISTENCE | ?CMD_GET_RANDOM_KEY |
-                     ?CMD_COMPACT_DB.
+                     ?CMD_COMPACT_DB | ?CMD_GET_CTRL_TOKEN | ?CMD_SET_CTRL_TOKEN.
 
 %% A memcached client that speaks binary protocol.
 -spec cmd(mc_opcode(), port(), recv_callback(), any(),
@@ -211,10 +213,10 @@ sync(Sock, VBucket, Key, CAS) ->
         {#mc_header{}, #mc_entry{data = Sync}}).
 
 create_bucket(Sock, BucketName, Engine, Config) ->
-    case cmd(?CMD_CREATE_BUCKET, Sock, undefined, undefined,
-             {#mc_header{},
-              #mc_entry{key = BucketName,
-                        data = list_to_binary([Engine, 0, Config])}}) of
+    case cmd_ctrl(?CMD_CREATE_BUCKET, Sock,
+                  {#mc_header{},
+                   #mc_entry{key = BucketName,
+                             data = list_to_binary([Engine, 0, Config])}}) of
         {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} ->
             ok;
         Response -> process_error_response(Response)
@@ -224,28 +226,28 @@ create_bucket(Sock, BucketName, Engine, Config) ->
 delete_bucket(Sock, BucketName, Options) ->
     Force = proplists:get_bool(force, Options),
     Config = io_lib:format("force=~s", [Force]),
-    case cmd(?CMD_DELETE_BUCKET, Sock, undefined, undefined,
-             {#mc_header{},
-              #mc_entry{key = BucketName,
-                        data = iolist_to_binary(Config)}}, infinity) of
+    case cmd_ctrl(?CMD_DELETE_BUCKET, Sock,
+                  {#mc_header{},
+                   #mc_entry{key = BucketName,
+                             data = iolist_to_binary(Config)}}, infinity) of
         {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} ->
             ok;
         Response -> process_error_response(Response)
     end.
 
 delete_vbucket(Sock, VBucket) ->
-    case cmd(?CMD_DELETE_VBUCKET, Sock, undefined, undefined,
-             {#mc_header{vbucket = VBucket}, #mc_entry{}},
-             ?VB_DELETE_TIMEOUT) of
+    case cmd_ctrl(?CMD_DELETE_VBUCKET, Sock,
+                  {#mc_header{vbucket = VBucket}, #mc_entry{}},
+                  ?VB_DELETE_TIMEOUT) of
         {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} ->
             ok;
         Response -> process_error_response(Response)
     end.
 
 sync_delete_vbucket(Sock, VBucket) ->
-    case cmd(?CMD_DELETE_VBUCKET, Sock, undefined, undefined,
-             {#mc_header{vbucket = VBucket}, #mc_entry{data = <<"async=0">>}},
-             infinity) of
+    case cmd_ctrl(?CMD_DELETE_VBUCKET, Sock,
+                  {#mc_header{vbucket = VBucket}, #mc_entry{data = <<"async=0">>}},
+                  infinity) of
         {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} ->
             ok;
         Response -> process_error_response(Response)
@@ -365,8 +367,8 @@ set_engine_param(Sock, Key, Value, Type) ->
     Entry = #mc_entry{key = Key,
                       data = Value,
                       ext = <<ParamType:32/big>>},
-    case cmd(?CMD_SET_PARAM, Sock, undefined, undefined,
-             {#mc_header{}, Entry}) of
+    case cmd_ctrl(?CMD_SET_PARAM, Sock,
+                  {#mc_header{}, Entry}) of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->
             ok;
         Response ->
@@ -396,9 +398,9 @@ compact_vbucket(Sock, VBucket, PurgeBeforeTS, PurgeBeforeSeqNo, DropDeletes) ->
                  0
          end,
     Ext = <<PurgeBeforeTS:64, PurgeBeforeSeqNo:64, DD:8, 0:8, 0:16, 0:32>>,
-    case cmd(?CMD_COMPACT_DB, Sock, undefined, undefined,
-             {#mc_header{vbucket = VBucket}, #mc_entry{ext = Ext}},
-             infinity) of
+    case cmd_ctrl(?CMD_COMPACT_DB, Sock,
+                  {#mc_header{vbucket = VBucket}, #mc_entry{ext = Ext}},
+                  infinity) of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->
             ok;
         Response -> process_error_response(Response)
@@ -534,7 +536,7 @@ do_update_with_rev(Sock, VBucket, Key, Value, Rev, CAS, OpCode) ->
 deregister_tap_client(Sock, TapName) ->
     HeaderEntry = {#mc_header{}, #mc_entry{key = TapName}},
     {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} =
-        cmd(?CMD_DEREGISTER_TAP_CLIENT, Sock, undefined, undefined, HeaderEntry),
+        cmd_ctrl(?CMD_DEREGISTER_TAP_CLIENT, Sock, HeaderEntry),
     ok.
 
 -spec change_vbucket_filter(port(), binary(),
@@ -545,9 +547,9 @@ change_vbucket_filter(Sock, TapName, VBuckets) ->
         << VBucketsCount:16,
            << <<V:16, C:64>> || {V, C} <- VBuckets >>/binary >>,
 
-    case cmd(?CMD_CHANGE_VB_FILTER, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{key = TapName,
-                                      data = Data}}) of
+    case cmd_ctrl(?CMD_CHANGE_VB_FILTER, Sock,
+                  {#mc_header{}, #mc_entry{key = TapName,
+                                           data = Data}}) of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->
             ok;
         Other ->
@@ -571,8 +573,6 @@ disable_traffic(Sock) ->
         Other ->
             process_error_response(Other)
     end.
-
-
 
 %% -------------------------------------------------
 
@@ -693,7 +693,6 @@ flush_test() ->
                                  [binary, {packet, 0}, {active, false}]),
     flush_test_sock(Sock),
     ok = gen_tcp:close(Sock).
-
 flush_test_sock(Sock) ->
     {ok, _H, _E, undefined} = cmd(?FLUSH, Sock, undefined, undefined, blank_he()).
 
@@ -955,9 +954,9 @@ get_mass_tap_docs_estimate(Sock, VBuckets) ->
           end || VB <- VBuckets]}.
 
 set_cluster_config(Sock, Blob) ->
-    RV = cmd(?CMD_SET_CLUSTER_CONFIG, Sock, undefined, undefined,
-             {#mc_header{}, #mc_entry{key = <<"">>, data = Blob}},
-             infinity),
+    RV = cmd_ctrl(?CMD_SET_CLUSTER_CONFIG, Sock,
+                  {#mc_header{}, #mc_entry{key = <<"">>, data = Blob}},
+                  infinity),
     case RV of
         {ok, #mc_header{status=?SUCCESS}, _, _} ->
             ok;
@@ -974,4 +973,49 @@ get_random_key(Sock) ->
             {ok, Key};
         Other ->
             process_error_response(Other)
+    end.
+
+get_ctrl_token(Sock) ->
+    case cmd(?CMD_GET_CTRL_TOKEN, Sock, undefined, undefined,
+             {#mc_header{}, #mc_entry{}},
+             infinity) of
+        {ok, #mc_header{status=?SUCCESS}, #mc_entry{cas = Token}, _} ->
+            {ok, Token};
+        Other ->
+            process_error_response(Other)
+    end.
+
+set_ctrl_token(Sock, OldToken, NewToken) ->
+    case cmd(?CMD_SET_CTRL_TOKEN, Sock, undefined, undefined,
+             {#mc_header{}, #mc_entry{cas = OldToken, data = <<NewToken:64>>}},
+             infinity) of
+        {ok, #mc_header{status=?SUCCESS}, #mc_entry{cas = Token}, _} ->
+            {ok, Token};
+        {ok, #mc_header{status=?KEY_EEXISTS}, #mc_entry{cas = Token}, _} ->
+            {memcached_error, key_eexists, Token};
+        Other ->
+            process_error_response(Other)
+    end.
+
+cmd_ctrl(OpCode, Sock, HeaderEntry) ->
+    cmd_ctrl(OpCode, Sock, HeaderEntry, undefined).
+
+cmd_ctrl(OpCode, Sock, HeaderEntry, Timeout) ->
+    Token = ns_memcached_token:get_token(),
+    Ret = cmd_ctrl_with_token(OpCode, Sock, HeaderEntry, Timeout, Token),
+    ns_memcached_token:release_token(),
+    Ret.
+
+cmd_ctrl_with_token(OpCode, Sock, {Header, Entry}, Timeout, Token) ->
+    ?log_info("BLAH ~p", [Token]),
+    case cmd(OpCode, Sock, undefined, undefined,
+             {Header, Entry#mc_entry{cas = Token}},
+             Timeout) of
+        {ok, #mc_header{status = ?KEY_EEXISTS}, #mc_entry{cas = NewToken}, _}
+          when Token =/= NewToken ->
+            ?log_debug("ep-engine token mismatch. Retry. Command ~p, Token ~p, NewToken ~p",
+                       [OpCode, Token, NewToken]),
+            cmd_ctrl_with_token(OpCode, Sock, {Header, Entry}, Timeout, NewToken);
+        Other ->
+            Other
     end.

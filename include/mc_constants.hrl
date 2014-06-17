@@ -88,6 +88,9 @@
 -define(CMD_ISASL_REFRESH, 16#f1).
 -define(CMD_SSL_CERTS_REFRESH, 16#f2).
 
+-define(CMD_SET_CTRL_TOKEN, 16#f4).
+-define(CMD_GET_CTRL_TOKEN, 16#f5).
+
 -define(RGET,        16#30).
 -define(RSET,        16#31).
 -define(RSETQ,       16#32).

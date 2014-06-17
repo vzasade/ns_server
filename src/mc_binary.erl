@@ -212,6 +212,7 @@ encode(Magic,
                  data = Data, datatype = DataType}) ->
     ExtLen = bin_size(Ext),
     KeyLen = bin_size(Key),
+    ?log_info("BLAH DATA ~p", [Data]),
     BodyLen = ExtLen + KeyLen + bin_size(Data),
     [<<Magic:8, Opcode:8, KeyLen:16, ExtLen:8, DataType:8,
        VBucket:16, BodyLen:32, Opaque:32, CAS:64>>,

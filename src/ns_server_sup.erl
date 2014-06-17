@@ -182,6 +182,9 @@ child_specs() ->
      {ns_memcached_sockets_pool, {ns_memcached_sockets_pool, start_link, []},
       permanent, 1000, worker, []},
 
+     {ns_memcached_token, {ns_memcached_token, start_link, []},
+      permanent, 1000, worker, []},
+
      {xdcr_upr_sockets_pool, {xdcr_upr_sockets_pool, start_link, []},
       permanent, 1000, worker, []},
 
