@@ -34,7 +34,10 @@
          random_node/0,
          nodes_actual_proper/0,
          nodes_actual_other/0,
-         register_node_renaming_txn/1]).
+         register_node_renaming_txn/1,
+         couchdb_node/0,
+         local_sub_nodes/0,
+         ns_server_node/0]).
 
 -export([ns_log_cat/1, ns_log_code_string/1]).
 
@@ -71,10 +74,31 @@ nodes_actual() ->
 % of nodes that are on the nodes_wanted() list.
 
 nodes_actual_proper() ->
+    only_live_nodes(nodes_wanted()).
+
+only_live_nodes(Nodes) ->
     Curr = nodes_actual(),
-    Want = nodes_wanted(),
-    Diff = lists:subtract(Curr, Want),
+    Diff = lists:subtract(Curr, Nodes),
     lists:usort(lists:subtract(Curr, Diff)).
+
+couchdb_node() ->
+    case application:get_env(ns_server, ns_couchdb_node) of
+        {ok, Node} ->
+            Node;
+        undefined ->
+            node()
+    end.
+
+ns_server_node() ->
+    case application:get_env(ns_couchdb, ns_server_node) of
+        {ok, Node} ->
+            Node;
+        undefined ->
+            node()
+    end.
+
+local_sub_nodes() ->
+    only_live_nodes([couchdb_node()]).
 
 register_node_renaming_txn(Pid) ->
     gen_server:call(?MODULE, {register_node_renaming_txn, Pid}).
