@@ -724,16 +724,10 @@ get_master_db_size_info(DbName) ->
         couch_db:close(Db)
     end.
 
-get_db_size_info(Bucket, VBucket) ->
-    {ok, Props} = ns_memcached:get_vbucket_details_stats(Bucket, VBucket),
-
-    {list_to_integer(proplists:get_value("db_data_size", Props)),
-     list_to_integer(proplists:get_value("db_file_size", Props))}.
-
 maybe_compact_vbucket(BucketName, {VBucket, DbName},
                       Config, Force, Options) ->
     Bucket = binary_to_list(BucketName),
-    SizeInfo = get_db_size_info(Bucket, VBucket),
+    SizeInfo = ns_memcached:get_vbucket_size_info(Bucket, VBucket),
 
     Force orelse vbucket_needs_compaction(SizeInfo, Config) orelse exit(normal),
 
@@ -948,7 +942,7 @@ start_view_index_compactor(BucketName, DDocId, Type, InitialStatus) ->
 bucket_needs_compaction(BucketName, NumVBuckets,
                         #config{daemon=#daemon_config{min_file_size=MinFileSize},
                                 db_fragmentation=FragThreshold}) ->
-    {DataSize, FileSize} = aggregated_size_info(binary_to_list(BucketName)),
+    {DataSize, FileSize} = ns_memcached:get_bucket_size_info(binary_to_list(BucketName)),
 
     ?log_debug("`~s` data size is ~p, disk size is ~p",
                [BucketName, DataSize, FileSize]),
@@ -969,19 +963,6 @@ file_needs_compaction(DataSize, FileSize, FragThreshold, MinFileSize) ->
 
             check_fragmentation(FragThreshold, Frag, FragSize)
     end.
-
-aggregated_size_info(Bucket) ->
-    {ok, {DS, FS}} =
-        ns_memcached:raw_stats(node(), Bucket, <<"diskinfo">>,
-                               fun (<<"ep_db_file_size">>, V, {DataSize, _}) ->
-                                       {DataSize, V};
-                                   (<<"ep_db_data_size">>, V, {_, FileSize}) ->
-                                       {V, FileSize};
-                                   (_, _, Tuple) ->
-                                       Tuple
-                               end, {<<"0">>, <<"0">>}),
-    {list_to_integer(binary_to_list(DS)),
-     list_to_integer(binary_to_list(FS))}.
 
 check_fragmentation({FragLimit, FragSizeLimit}, Frag, FragSize) ->
     true = is_integer(FragLimit),
