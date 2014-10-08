@@ -129,7 +129,7 @@ create_ns_couchdb_spec() ->
                end,
 
     ErlangArgs = CouchIni ++
-        ["-setcookie", atom_to_list(erlang:get_cookie()),
+        ["-setcookie", atom_to_list(ns_server:get_babysitter_cookie()),
          "-name", atom_to_list(ns_node_disco:couchdb_node()),
          "-smp", "enable",
          "+P", "327680",

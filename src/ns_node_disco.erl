@@ -84,6 +84,7 @@ only_live_nodes(Nodes) ->
 couchdb_node() ->
     case application:get_env(ns_server, ns_couchdb_node) of
         {ok, Node} ->
+            erlang:set_cookie(Node, ns_server:get_babysitter_cookie()),
             Node;
         undefined ->
             node()
