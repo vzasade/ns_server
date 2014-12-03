@@ -20,6 +20,12 @@
 
 -export([start_link/0, get_stats/0]).
 
+-export([doc/0]).
+
+doc() ->
+    {worker, {'fun', ?MODULE, start_loop},
+     "facility for collecting stats on ns_couchdb node"}.
+
 start_link() ->
     proc_lib:start_link(erlang, apply, [fun start_loop/0, []]).
 

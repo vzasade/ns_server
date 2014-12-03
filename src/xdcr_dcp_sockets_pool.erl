@@ -21,9 +21,15 @@
 
 -export([take_socket/1, put_socket/2]).
 
+-export([doc/0]).
+
 -include("ns_common.hrl").
 %% for ?XDCR_DCP_BUFFER_SIZE
 -include("xdcr_dcp_streamer.hrl").
+
+doc() ->
+    {gen_server, ?MODULE,
+     "pool of sockets that are used by xdcr dcp streaming"}.
 
 start_link() ->
     Options = [{name, ?MODULE},

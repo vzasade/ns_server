@@ -23,6 +23,8 @@
 -export([init/1, handle_call/3, handle_info/2, handle_cast/2]).
 -export([code_change/3, terminate/2]).
 
+-export([doc/0]).
+
 -include("ns_common.hrl").
 -include("couch_db.hrl").
 -include_lib("couch_set_view/include/couch_set_view.hrl").
@@ -31,6 +33,10 @@
                 num_changes,
                 replica_num_changes,
                 timer_ref}).
+
+doc() ->
+    {gen_server, ?MODULE, {since, "2.0"},
+     "periodically triggers set view indexes update"}.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

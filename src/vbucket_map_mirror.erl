@@ -43,6 +43,13 @@
          node_to_inner_capi_base_url/3, submit_full_reset/0,
          node_to_capi_base_url/2]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE, {since, "2.0"},
+     "maintains ets cache of vbucket map for faster view merger params generation. Also" ++
+         "caches capi_url(Node)"}.
+
 start_link() ->
     work_queue:start_link(vbucket_map_mirror, fun mirror_init/0).
 

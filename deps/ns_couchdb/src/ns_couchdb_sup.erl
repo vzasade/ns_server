@@ -26,6 +26,23 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one}, {since, "3.2"},
+     [
+      cb_couch_sup:doc(),
+      cb_init_loggers:doc(),
+      ns_memcached_sockets_pool:doc(),
+      xdcr_dcp_sockets_pool:doc(),
+      ns_couchdb_stats_collector:doc(),
+      ns_couchdb_config_sup:doc(),
+      request_throttler:doc(),
+      vbucket_map_mirror:doc(),
+      set_view_update_daemon:doc(),
+      ns_ssl_services_setup:doc_capi()
+     ]}.
+
 %% ===================================================================
 %% API functions
 %% ===================================================================

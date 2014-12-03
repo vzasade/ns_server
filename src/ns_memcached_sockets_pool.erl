@@ -23,6 +23,12 @@
 
 -export([take_socket/0, take_socket/1, put_socket/1, executing_on_socket/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "instance of ns_connection_pool for long blocking memcached calls"}.
+
 start_link() ->
     Options = [{name, ?MODULE},
                {connection_timeout, 30000},

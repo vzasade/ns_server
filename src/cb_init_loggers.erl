@@ -15,7 +15,11 @@
 
 -module(cb_init_loggers).
 
--export([start_link/0]).
+-export([start_link/0, doc/0]).
+
+doc() ->
+    {transient, {'fun', ?MODULE, start_link},
+     "sets log level to couchdb"}.
 
 start_link() ->
     set_couchdb_loglevel(),
