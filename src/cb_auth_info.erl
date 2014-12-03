@@ -23,7 +23,13 @@
 -export([init/1, handle_cast/2, handle_call/3,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/0]).
+
 -include("couch_db.hrl").
+
+doc() ->
+    {gen_server, ?MODULE,
+     "admin auth sharing process for view engine"}.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

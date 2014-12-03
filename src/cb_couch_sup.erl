@@ -23,6 +23,15 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one}, {since, "2.0"},
+     [
+      cb_auth_info:doc(),
+      {supervisor, couch_app}
+     ]}.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
