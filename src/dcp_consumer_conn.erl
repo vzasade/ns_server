@@ -26,6 +26,12 @@
 
 -export([init/2, handle_packet/5, handle_call/4, handle_cast/3]).
 
+-export([doc/2]).
+
+doc(Bucket, Node) ->
+    {gen_server, ?MODULE, {bucket, Bucket}, {node, Node}, {since, "3.0"},
+     "implements consumer side of dcp replication proxy"}.
+
 -record(stream_state, {owner :: {pid(), any()},
                        to_add :: [vbucket_id()],
                        to_close :: [vbucket_id()],

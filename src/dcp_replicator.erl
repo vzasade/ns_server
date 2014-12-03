@@ -32,6 +32,8 @@
          wait_for_data_move/3,
          get_docs_estimate/3]).
 
+-export([doc/2]).
+
 -record(state, {proxies,
                 consumer_conn :: pid(),
                 connection_name :: nonempty_string(),
@@ -39,6 +41,15 @@
                 bucket :: bucket_name()}).
 
 -define(VBUCKET_POLL_INTERVAL, 100).
+
+doc(Bucket, Node) ->
+    {gen_server, ?MODULE, {bucket, Bucket}, {node, Node}, {name, server_name(Node, Bucket)},
+     {since, "3.0"},
+     "implements frontend for dcp replication proxy",
+     [
+      dcp_consumer_conn:doc(Bucket, Node),
+      dcp_producer_conn:doc(Bucket, Node)
+     ]}.
 
 init({ProducerNode, Bucket}) ->
     process_flag(trap_exit, true),

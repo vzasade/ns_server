@@ -25,6 +25,16 @@
 
 -export([get_actual_replications/1, set_desired_replications/2, nuke/1]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {supervisor, ?MODULE, {bucket, Bucket}, {name, server_name(Bucket)}, {since, "3.0"},
+     {mode, one_for_one},
+     "hosts and manages dcp replicators",
+    [
+     dcp_replicator:doc(Bucket, 'node@ip')
+    ]}.
+
 start_link(Bucket) ->
     supervisor:start_link({local, server_name(Bucket)}, ?MODULE, []).
 
