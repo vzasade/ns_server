@@ -26,9 +26,16 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/0]).
+
 -include("ns_common.hrl").
 
 -record(state, {}).
+
+doc() ->
+    {gen_server, ?MODULE, {since, "2.0"},
+     "syncs important ns_config variables into couch config",
+     [{pubsub_link, nil, {to, ns_config_events}}]}.
 
 start_link() ->
     gen_server:start({local, ?MODULE}, ?MODULE, [], []).

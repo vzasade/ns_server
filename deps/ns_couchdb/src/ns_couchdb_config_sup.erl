@@ -19,7 +19,7 @@
 
 -behavior(supervisor).
 
--export([start_link/0]).
+-export([start_link/0, doc/0]).
 
 -export([init/1]).
 
@@ -49,3 +49,15 @@ init([]) ->
             {cb_config_couch_sync, start_link, []},
             permanent, 1000, worker, []}
           ]}}.
+
+doc() ->
+    {supervisor, ?MODULE, {mode, rest_for_one}, {since, "3.2"},
+     [
+      {gen_event, ns_config_events, "fired when any ns_config variable is changed"},
+      {gen_event, ns_config_events_local, {since, "1.8.1"},
+       "fired when any ns_config variable is changed locally (i.e. not replicated from other" ++
+           " node, but genuinely changed on this node"},
+      ns_config:doc(""),
+      ns_couchdb_config_rep:doc(),
+      cb_config_couch_sync:doc()
+     ]}.

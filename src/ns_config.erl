@@ -88,6 +88,8 @@
          load_file/2, save_config_sync/2, send_config/2,
          test_setup/1]).
 
+-export([doc/1]).
+
 % A static config file is often hand edited.
 % potentially with in-line manual comments.
 %
@@ -107,6 +109,11 @@
 
 %% state sanitization
 -export([format_status/2]).
+
+doc(Comment) ->
+    {gen_server, ?MODULE,
+     "maintains local ns_config. Fires ns_config_events when any config variable is changed " ++
+         Comment}.
 
 format_status(_Opt, [_PDict, State]) ->
     ns_config_log:sanitize(State).

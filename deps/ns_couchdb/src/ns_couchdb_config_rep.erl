@@ -32,8 +32,13 @@
 
 -export([update_ns_server_node_name/1]).
 
+-export([doc/0]).
+
 -define(MERGING_EMERGENCY_THRESHOLD, 2000).
 -define(PULL_TIMEOUT, 30000).
+
+doc() ->
+    {gen_server, ?MODULE, "ns_config replication from ns_server to ns_couchdb node"}.
 
 start_link() ->
     gen_server:start_link({local, ns_config_rep}, ?MODULE, [], []).
