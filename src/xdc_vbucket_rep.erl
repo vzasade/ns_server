@@ -54,6 +54,30 @@
 -import(couch_util, [get_value/2,
                      to_binary/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     {trap_exit, t},
+     {interacts_with, init_throttle},
+     {interacts_with, work_throttle},
+     {interacts_with, remote_clusters_info},
+     "responsible for orchestrating replication of single vbucket" ++
+         " (children are spawned only while actively replicating a batch of changes)",
+     [
+      {gen_server, couch_work_queue, {trap_exit, nil},
+       "holds docs to be picked up by workers and to be pushed onto remote end"},
+      {worker, changes_reader, {trap_exit, t},
+       "pulls mutations via xdcr_dcp_streamer and puts them into couch_work_queue" ++
+           " (see spawn_changes_reader)",
+       [{worker, "xdcr_dcp_streamer has child process that does actual socket work"}]},
+      {worker, changes_manager, {trap_exit, nil},
+       "intermediate process between rep workers and couch_work_queue" ++
+           " also helps parent xdc_vbucket_rep to track which batches where handed out to workers" ++
+           " (see spawn_changes_manager)"},
+      xdc_vbucket_rep_worker:doc()
+     ]}.
+
 -record(init_state, {
           rep,
           vb,

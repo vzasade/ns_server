@@ -19,6 +19,13 @@
 
 -include("xdc_replicator.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     "dynamic. Lets show single child",
+     [xdc_vbucket_rep:doc()]}.
+
 start_link(Specs) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, Specs),
     ?xdcr_debug("xdc vbucket replicator supervisor started: ~p", [Sup]),

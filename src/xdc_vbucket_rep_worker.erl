@@ -21,6 +21,16 @@
 %% imported functions
 -import(couch_util, [get_value/3]).
 
+-export([doc/0]).
+
+doc() ->
+    {worker, ?MODULE, {trap_exit, nil},
+     "pulls batch of docs from changes manager and sends them out to remote end" ++
+         " via xdc_vbucket_rep_xmem library. (there's by default 4 workers like this one)",
+     [{worker, {trap_exit, nil},
+       "There's temp process created per every xmem interaction" ++
+           " (via misc:executing_on_new_process). This is due to nature of how socket pools work"}]}.
+
 start_link(#rep_worker_option{cp = Cp, target = Target,
                               worker_id  = WorkerID,
                               changes_manager = ChangesManager,
