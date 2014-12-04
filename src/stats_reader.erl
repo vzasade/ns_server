@@ -37,6 +37,12 @@
 
 -import(stats_archiver, [avg/2]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {gen_server, ?MODULE, {bucket, Bucket},
+     "used to read stats archive"}.
+
 %%
 %% API
 %%

@@ -42,6 +42,13 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {gen_server, ?MODULE, {bucket, Bucket},
+     "on each tick grabs memcached stats parses/massages them a bit and sends them out to ns_stats_event",
+     [{pubsub_link, nil, {to, ns_tick_event}}]}.
+
 -define(NEED_TAP_STREAM_STATS_CODE, 1).
 -include("ns_stats.hrl").
 

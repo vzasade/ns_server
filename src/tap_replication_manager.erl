@@ -24,6 +24,12 @@
 
 -export([get_actual_replications/1, set_desired_replications/2]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {gen_server, ?MODULE, {name, server_name(Bucket)}, {bucket, Bucket},
+     "implements tap portion of replication manager. Serializes replication changes w.r.t." ++
+         " not-ready-vbuckets restarts."}.
 
 -include("ns_common.hrl").
 -include_lib("eunit/include/eunit.hrl").

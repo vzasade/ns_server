@@ -49,6 +49,12 @@
 -export([init/1, handle_event/2, handle_call/2,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {event_handler, ?MODULE, {bucket, Bucket}, {to, ns_stats_event},
+     "estimates bucket's replication up-to-date-ness 'from this node' based on stats it sees"}.
+
 -record(safeness_info,
         {backlog_size :: undefined | number(),
          drain_rate :: undefined | number(),

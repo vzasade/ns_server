@@ -39,6 +39,14 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {gen_server, ?MODULE, {name, server_name(Bucket)}, {bucket, Bucket}, {since, "3.0"},
+     "keeps track of desired replications. Routes replication work between tap and dcp depending" ++
+         " on bucket replication type.",
+     [tap_replication_manager:doc(Bucket)]}.
+
 server_name(Bucket) ->
     list_to_atom("replication_manager-" ++ Bucket).
 

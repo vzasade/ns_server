@@ -31,6 +31,13 @@
 
 -export([init/2, handle_packet/5, handle_call/4, handle_cast/3]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {gen_server, ?MODULE, {name, server_name(Bucket)}, {bucket, Bucket}, {since, "3.0"},
+     "note: it's part of data path. Allows xdcr-over-xmem to check/wait until vbucket" ++ 
+         " has greater seqno then xdcr consumed. Only applies to couchbase buckets"}.
+
 start_link(Bucket) ->
     single_bucket_sup:ignore_if_not_couchbase_bucket(
       Bucket,

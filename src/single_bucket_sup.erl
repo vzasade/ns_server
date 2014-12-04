@@ -7,6 +7,23 @@
 -export([start_link/1, init/1,
          ignore_if_not_couchbase_bucket/2]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {supervisor, ?MODULE, {mode, one_for_one}, {bucket, Bucket},
+     [
+      docs_sup:doc(Bucket),
+      ns_memcached_sup:doc(Bucket),
+      ns_vbm_sup:doc(Bucket),
+      dcp_sup:doc(Bucket),
+      replication_manager:doc(Bucket),
+      dcp_notifier:doc(Bucket),
+      janitor_agent_sup:doc(Bucket),
+      stats_collector:doc(Bucket),
+      stats_archiver:doc(Bucket),
+      stats_reader:doc(Bucket),
+      failover_safeness_level:doc(Bucket)
+     ]}.
 
 start_link(BucketName) ->
     ParentPid = self(),

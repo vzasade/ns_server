@@ -35,6 +35,12 @@
 
 -export([perform_vbucket_filter_change/6]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {supervisor, ?MODULE, {mode, one_for_one}, {name, server_name(Bucket)},
+     {bucket, Bucket}, "hosts replication ebucketmigrators for 2.0 'replicators on destination'"}.
+
 %%
 %% API
 %%

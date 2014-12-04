@@ -41,6 +41,12 @@
 -define(BACKUP_INTERVAL,
         ns_config:get_timeout_fast(stats_archiver_backup_interval, 120000)).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {gen_server, ?MODULE, {bucket, Bucket},
+     "saves stats for this bucket that it sees on ns_stats_event",
+     [{pubsub_link, nil, {to, ns_stats_event}}]}.
 
 %%
 %% API
