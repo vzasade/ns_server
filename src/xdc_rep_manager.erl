@@ -38,6 +38,13 @@
 
 -include("xdc_replicator.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "starts/stops replications under xdc_replication_sup if the replication conf has changed." ++
+         " receives change notifications from xdc_rdoc_manager"}.
+
 start_link() ->
     ?xdcr_info("start XDCR replication manager..."),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

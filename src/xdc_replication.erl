@@ -29,6 +29,21 @@
 -include("remote_clusters_info.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "controls xdcr replication as a set of per-vbucket replicator",
+     [
+      {pubsub_link, nil, {to, ns_config_events},
+       "observes vbucket map of it's bucket and notifies parent" ++
+           " xdc_replication about topology changes"},
+      new_concurrency_throttle:doc(init_throttle, "per-vbucket replications initalization"),
+      new_concurrency_throttle:doc(work_throttle, "per-vbucket replications replication"),
+      xdcr_opaque_checker:doc(),
+      xdc_vbucket_rep_sup:doc()
+     ]}.
+
 %% rate of replicaiton stat maintained in bucket replicator
 -record(ratestat, {
           timestamp = now(),

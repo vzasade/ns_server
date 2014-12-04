@@ -22,6 +22,13 @@
 
 -include("xdc_replicator.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     "owns individual XDCR replications",
+     [xdc_replication:doc()]}.
+
 start_link() ->
     ?xdcr_info("start XDCR bucket replicator supervisor..."),
     ets:delete_all_objects(xdcr_stats),

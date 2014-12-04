@@ -25,6 +25,13 @@
 -export([start_link/1, init/1, handle_call/3, handle_info/2, handle_cast/2]).
 -export([code_change/3, terminate/2]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "mass checks remote nodes for failover also mass checks local vbuckets highseqno and updates" ++
+         " parent replicator seqnos remaining to replicate stats"}.
+
 start_link(Rep) ->
     gen_server:start_link(?MODULE, Rep, []).
 

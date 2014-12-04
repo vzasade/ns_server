@@ -28,6 +28,12 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/1]).
+
+doc(Node) ->
+    {gen_server, ?MODULE, {runs_on, Node}, {since, "3.2"},
+     "responsible for managing xdcr configuration documents (_replicator db)"}.
+
 -record(state, {ddoc_replicator :: pid(),
                 rep_manager :: pid(),
                 local_docs = [] :: [#doc{}]}).

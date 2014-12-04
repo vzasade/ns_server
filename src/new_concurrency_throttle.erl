@@ -40,6 +40,11 @@
 %% for debugging and diagnostics purposes
 -export([get_waiters_and_monitors/1]).
 
+-export([doc/2]).
+
+doc(Name, For) ->
+    {gen_server, ?MODULE, {name, Name}, "concurrency throttle for " ++ For}.
+
 -record(state, {update_status_tref :: reference() | undefined,
                 type :: term(),
                 parent :: pid() | undefined,

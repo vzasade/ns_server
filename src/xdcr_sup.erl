@@ -22,6 +22,20 @@
 
 -include("ns_common.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_all},
+     [
+      remote_monitors:doc_wait_for_net_kernel(),
+      {worker, {'fun', ?MODULE, link_stats_holder_body}},
+      xdc_replication_sup:doc(),
+      xdc_rep_manager:doc(),
+      doc_replicator:doc(xdcr),
+      doc_replication_srv:doc(xdcr),
+      xdc_rdoc_manager:doc('ns_couchdb@ip')
+     ]}.
+
 start_link() ->
     supervisor:start_link(?MODULE, []).
 
