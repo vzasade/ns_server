@@ -29,6 +29,25 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, rest_for_one},
+     [
+      {transient, {'fun', ns_server, setup_node_names},
+       "Sets babysitter and couchdb node names into the application env. " ++
+           "Sets the cookie for ns_couchdb node"},
+      remote_monitors:doc(),
+      {worker, {'fun', ?MODULE, start_couchdb_node},
+       "Port server for ns_couchdb node"},
+      {worker, {'fun', ?MODULE, wait_link_to_couchdb_node},
+       "Waits for ns_couchdb node to start and maintains remote monitor to the supervisor" ++
+           " on that node"},
+      {transient, {'fun', ns_storage_conf, setup_db_and_ix_paths},
+       "retrieves db and ix paths from couchdb node and stores them to application env"},
+      ns_server_sup:doc()
+     ]}.
+
 %% ===================================================================
 %% API functions
 %% ===================================================================

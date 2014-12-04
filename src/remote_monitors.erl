@@ -28,15 +28,21 @@
 
 -export([start_link/0, monitor/1, register_node_renaming_txn/1, wait_for_net_kernel/0]).
 
--export([doc_wait_for_net_kernel/0]).
+-export([doc/0, doc_wait_for_net_kernel/0]).
 
 -record(state, {node_renaming_txn_mref :: undefined | reference(),
                 monitors :: [] | [pid()]
                }).
 
+doc() ->
+    {gen_server, ?MODULE,
+     "server that allows to defer DOWN message from remote monitor in case" ++
+         " if the net kernel is restarted till the start of the net kernel"}.
+
 doc_wait_for_net_kernel() ->
     {transient, {'fun', ?MODULE, wait_for_net_kernel},
      "wait for net_kernel to start"}.
+
 init([]) ->
     {ok, #state{node_renaming_txn_mref = undefined,
                 monitors = []}}.
