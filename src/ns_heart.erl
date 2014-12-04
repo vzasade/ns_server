@@ -38,6 +38,18 @@
           slow_status_ts = {0, 0, 0} :: erlang:timestamp()
          }).
 
+-export([doc/0, doc_slow_updater/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "gathers local stats & other info and broadcasts that to all node's ns_doctor"}.
+
+doc_slow_updater() ->
+    {worker, {'fun', ?MODULE, start_link_slow_updater},
+     "There's now separate process that listens to status update requests " ++
+         "from main heartbeat process. And heartbeat process is only willing to " ++
+         "wait for fresh slow status for heartbeat interval. In case slow status " ++
+         "update takes longer than that, heartbeat sends last seen stale slow status."}.
 
 %% gen_server handlers
 

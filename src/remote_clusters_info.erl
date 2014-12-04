@@ -126,6 +126,13 @@
                 remote_bucket_waiters :: dict(),
                 remote_bucket_waiters_trefs :: dict()}).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "service to query and cache remote clusters information (cluster nodes and vbucket" ++
+         " maps in particular"}.
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

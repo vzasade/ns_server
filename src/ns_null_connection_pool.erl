@@ -30,6 +30,11 @@
 
 -behaviour(gen_server).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE}.
+
 start_link(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, [], []).
 

@@ -48,6 +48,11 @@
 -define(doctor_error(Msg), ale:error(?NS_DOCTOR_LOGGER, Msg)).
 -define(doctor_error(Fmt, Args), ale:error(?NS_DOCTOR_LOGGER, Fmt, Args)).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "keeps track of latest heartbeats from other nodes"}.
 
 %% gen_server handlers
 

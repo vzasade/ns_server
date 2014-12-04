@@ -36,6 +36,14 @@
 %% bucket info
 -define(LOCALHOST_MARKER_STRING, "$HOST").
 
+-export([doc/0]).
+
+doc() ->
+    {work_queue, ?MODULE, {since, "2.5"},
+     "maintains ets cache of terse bucket details",
+     [{gen_event, bucket_info_cache_invalidations, {since, "2.5"},
+      "fired when any bucket info is invalidated"}]}.
+
 start_link() ->
     work_queue:start_link(bucket_info_cache, fun cache_init/0).
 

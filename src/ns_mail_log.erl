@@ -30,6 +30,11 @@
 
 -include("ns_common.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {event_handler, ?MODULE, {to, ns_log_events}}.
+
 %% gen_event handlers
 
 % Noop process to get initialized in the supervision tree.

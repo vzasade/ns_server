@@ -30,6 +30,12 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE, {since, "3.0"},
+     "triggers and monitors bucket's db and views compaction"}.
+
 -record(compaction_state, {buckets_to_compact :: [binary()],
                            compactor_pid :: pid(),
                            scheduler,

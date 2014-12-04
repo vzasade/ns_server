@@ -13,6 +13,12 @@
 
 -export([perform_loading_task/2]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE, {since, "2.0"},
+     "babysits sample loading tasks and exposes them via tasks API"}.
+
 start_loading_sample(Name, Quota) ->
     gen_server:call(?MODULE, {start_loading_sample, Name, Quota}, infinity).
 

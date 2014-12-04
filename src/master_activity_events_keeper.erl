@@ -32,6 +32,13 @@
 
 -record(state, {ring}).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "local 'archive' of recent master events. Keeps 8k of recent events. Only " ++
+         "relevant on master node."}.
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

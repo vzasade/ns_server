@@ -8,6 +8,12 @@
 
 -export([take_socket/1, put_socket/2]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "instance of ns_connection_pool for memcached requests of xmem"}.
+
 start_link() ->
     Options = [{name, memcached_clients_pool},
                {connection_timeout, 30000},

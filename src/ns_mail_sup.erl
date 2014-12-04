@@ -21,6 +21,15 @@
 
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_all},
+     "sends out mails for 'alertful' ns_log entries",
+     [
+      ns_mail_log:doc()
+     ]}.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

@@ -24,6 +24,7 @@
 
 -export([init/1]).
 
+-export([doc/0]).
 
 %% @doc Notify the supervisor that the node's name has changed so it
 %% can restart children that care.
@@ -34,6 +35,60 @@ node_name_changed() ->
     {ok, _} = supervisor2:restart_child(?MODULE, mb_master),
     ok.
 
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     [
+      ns_disksup:doc(),
+      {work_queue, diag_handler_worker},
+      dir_size:doc(),
+      request_throttler:doc(),
+      ns_log:doc(),
+      ns_log:doc_crash_consumer(),
+      ns_config_isasl_sync:doc(),
+      {gen_event, ns_log_events, "ns_log logged events are broadcasted here. ns_mail_log uses it"},
+      ns_node_disco_sup:doc(),
+      vbucket_map_mirror:doc(),
+      bucket_info_cache:doc(),
+      {gen_event, ns_tick_event,
+       "local tick event. Singleton ns_tick on master node will fire tick events on all nodes"},
+      {gen_event, buckets_events,
+       "fired when bucket is started/warmed-up/shutdown. Also fired by ns_doctor" ++
+           " when remote bucket startup/warmup/shutdown discovered"},
+      ns_mail_sup:doc(),
+      {gen_event, ns_stats_event,
+       "various stats collectors (for all buckets) fire newly gathered stats" ++
+           " samples via this guy. NOTE: 1.8.1 spawns this a bit later"},
+      samples_loader_tasks:doc(),
+      ns_heart_sup:doc(),
+      ns_doctor:doc(),
+      remote_clusters_info:doc(),
+      master_activity_events:doc(),
+      mb_master:doc(),
+      master_activity_events:doc_ingress(),
+      master_activity_events:doc_timestamper(),
+      master_activity_events_pids_watcher:doc(),
+      master_activity_events_keeper:doc(),
+      menelaus_sup:doc(),
+      ns_ports_setup:doc(),
+      ns_memcached_sockets_pool:doc(),
+      memcached_config_mgr:doc(),
+      ns_ports_setup:doc_memcached_force_killer(),
+      ns_memcached_log_rotator:doc(),
+      memcached_clients_pool:doc(),
+      proxied_memcached_clients_pool:doc(),
+      {gen_server, xdc_lhttpc_pool,
+       "instance of lhttpc_manager used by xdcr lhttp requests"},
+      ns_null_connection_pool:doc(),
+      xdcr_sup:doc(),
+      xdcr_dcp_sockets_pool:doc(),
+      ns_bucket_worker_sup:doc(single_bucket_sup),
+      system_stats_collector:doc(),
+      stats_archiver:doc("@system"),
+      stats_reader:doc("@system"),
+      compaction_daemon:doc(),
+      compaction_new_daemon:doc(),
+      cluster_logs_sup:doc()
+     ]}.
 
 start_link() ->
     supervisor2:start_link({local, ?MODULE}, ?MODULE, []).

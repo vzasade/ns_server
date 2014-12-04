@@ -43,6 +43,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("ns_common.hrl").
 
+-export([doc/0, doc_crash_consumer/0]).
+
+doc() ->
+    {gen_server, ?MODULE}.
+
+doc_crash_consumer() ->
+    {worker, {'fun', ?MODULE, start_link_crash_consumer},
+     "eats crash records from babysitter's ns_crash_log service and ns_log-s them"}.
+
 -record(state, {unique_recent,
                 dedup,
                 save_tref,

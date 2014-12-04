@@ -26,6 +26,11 @@
 
 -include("ns_common.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE}.
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

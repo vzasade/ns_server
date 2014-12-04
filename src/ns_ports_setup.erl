@@ -9,6 +9,19 @@
 %% referenced by config
 -export([omit_missing_mcd_ports/2]).
 
+-export([doc/0, doc_memcached_force_killer/0]).
+
+doc() ->
+    {worker, ?MODULE,
+     "build list of port servers (with full command line and environment) and passes it to " ++
+         "babysitter's ns_child_ports_sup. It links to babysitter's ns_child_ports_sup.  And " ++
+         "reacts on ns_config changes in order to reconfigure set of servers we need to run. " ++
+         "Those port servers are usually memcached and moxi and all per-port moxis"}.
+
+doc_memcached_force_killer() ->
+    {pubsub_link, {'fun', ?MODULE, memcached_force_killer_fn}, {to, ns_config_events},
+     "implements memcached die! signalling after failover"}.
+
 start() ->
     proc_lib:start_link(?MODULE, setup_body_tramp, []).
 

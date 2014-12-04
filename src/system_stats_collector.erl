@@ -43,6 +43,11 @@
 
 -record(state, {port, prev_sample}).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE}.
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

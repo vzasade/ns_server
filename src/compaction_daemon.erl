@@ -31,6 +31,13 @@
 -export([init/1, handle_event/3, handle_sync_event/4, handle_info/3,
          code_change/4, terminate/3]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_fsm, ?MODULE,
+     "stab for compatibility with pre 3.0 nodes, that call compaction_daemon " ++
+         "remotely as an fsm"}.
+
 %% API
 start_link() ->
     gen_fsm:start_link({local, ?MODULE}, ?MODULE, [], []).

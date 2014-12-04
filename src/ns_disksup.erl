@@ -16,9 +16,7 @@
 %%
 %% %CopyrightEnd%
 %%
-%% forked shortened version of R16 disksup. serves 2 purposes:
-%% - include bind mounts into linux disk info
-%% - fix OSX disksup that is broken in R14 (to be removed after move to R16)
+%% forked shortened version of R16 disksup. to include bind mounts into linux disk info
 
 -module(ns_disksup).
 -behaviour(gen_server).
@@ -30,6 +28,12 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
+
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "forked shortened version of R16 disksup. to include bind mounts into linux disk info"}.
 
 -record(state, {timeout, os, diskdata = [], port}).
 

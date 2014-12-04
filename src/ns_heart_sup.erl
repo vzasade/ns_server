@@ -21,6 +21,15 @@
 
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, rest_for_one},
+     [
+      ns_heart:doc(),
+      ns_heart:doc_slow_updater()
+     ]}.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

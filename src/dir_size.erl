@@ -24,6 +24,12 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "Spawns go du implementation as a port on supported OSes and implements quick " ++
+         "DU (directory size) service via that port"}.
 
 godu_name() ->
     case erlang:system_info(system_architecture) of

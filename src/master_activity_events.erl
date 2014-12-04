@@ -63,6 +63,21 @@
 
 -export([stream_events/2]).
 
+-export([doc/0, doc_timestamper/0, doc_ingress/0]).
+
+doc() ->
+    {gen_event, ?MODULE,
+     "Timestamped master activity events. Real data only on master node."}.
+
+doc_timestamper() ->
+    {pubsub_link, master_activity_events_timestamper, {to, master_activity_events_ingress},
+     "adds timestamps to ingress events also serves queued note_xxx requests " ++
+         " by sending them to ingress process on master"}.
+
+doc_ingress() ->
+    {gen_event, master_activity_events_ingress,
+     "Raw master activity events. Remote nodes send their stuff to master's ingress events process"}.
+
 submit_cast(Arg) ->
     (catch gen_event:notify(master_activity_events_ingress, {submit_master_event, Arg})).
 

@@ -38,6 +38,14 @@
 %% state sanitization
 -export([format_status/2]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "saves bucket passwords to isasl.pw",
+     [{pubsub_link, nil, {to, ns_config_events}}]}.
+
+
 format_status(_Opt, [_PDict, State]) ->
     Buckets = lists:map(fun ({U, _P}) ->
                                 {U, "*****"}
