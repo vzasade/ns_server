@@ -25,6 +25,17 @@
 
 -export([init/1]).
 
+-export([doc/1]).
+
+doc(BucketName) ->
+    {supervisor, ?MODULE, {bucket, BucketName}, {mode, rest_for_one},
+     "supervisor for ns_memcahced and the processes that have to be restarted" ++
+         " if ns_memcached is restarted",
+     [
+      ns_memcached:doc(BucketName),
+      terse_bucket_info_uploader:doc(BucketName)
+     ]}.
+
 start_link(BucketName) ->
     supervisor:start_link(?MODULE, [BucketName]).
 

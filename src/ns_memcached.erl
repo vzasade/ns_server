@@ -146,6 +146,16 @@
 -include("mc_constants.hrl").
 -include("mc_entry.hrl").
 
+-export([doc/1]).
+
+doc(BucketName) ->
+    {gen_server, ?MODULE, {bucket, BucketName}, {name, server(BucketName)},
+     "our communication channel with bucket. Creates bucket on startup. Monitors it for warmup." ++
+         " Monitors bucket parameters versus config (i.e. if bucket quota needs to be adjusted)." ++
+         " Performs requests to grab stats and change vbucket states. Since 1.8.1" ++
+         " we maintain pool of workers and each worker has 1 connection to memcached." ++
+         " Main process is passing requests to workers in pool trying to be smart about queuing."}.
+
 %%
 %% gen_server API implementation
 %%

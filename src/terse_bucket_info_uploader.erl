@@ -20,12 +20,22 @@
 
 -export([start_link/1]).
 
+-export([doc/1]).
+
+doc(BucketName) ->
+    {work_queue, ?MODULE, {bucket, BucketName}, {name, server_name(BucketName)},
+     "observes invalidations of bucket info cache and uploads" ++
+         " fresh test bucket details to ep-engine",
+     [{pubsub_link, nil, {to, bucket_info_cache_invalidations}}]}.
+
+server_name(BucketName) ->
+    list_to_atom("terse_bucket_info_uploader-" ++ BucketName).
+
 start_link(BucketName) ->
     single_bucket_sup:ignore_if_not_couchbase_bucket(
       BucketName,
       fun (_) ->
-              Name = list_to_atom("terse_bucket_info_uploader-" ++ BucketName),
-              work_queue:start_link(Name, fun () -> init(BucketName) end)
+              work_queue:start_link(server_name(BucketName), fun () -> init(BucketName) end)
       end).
 
 init(BucketName) ->
