@@ -13,7 +13,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% @doc suprevisor for dcp_replicator's
+%% @doc suprevisor for starting couchdb related processes for bucket on ns_couchdb node
+%%      and views replication
 %%
 -module(docs_sup).
 
@@ -22,6 +23,21 @@
 -include("ns_common.hrl").
 
 -export([start_link/1, init/1]).
+
+-export([doc/1]).
+
+doc(Bucket) ->
+    {supervisor, ?MODULE, {bucket, Bucket}, {mode, one_for_all},
+     "suprevisor for starting couchdb related processes for bucket on ns_couchdb node" ++
+         " and views replication",
+     [
+      remote_monitors:doc_wait_for_net_kernel(),
+      doc_replicator:doc(Bucket),
+      doc_replication_srv:doc(Bucket),
+      capi_set_view_manager:doc('ns_couchdb_node@ip', Bucket),
+      couch_stats_reader:doc('ns_couchdb_node@ip', Bucket)
+     ]
+    }.
 
 start_link(Bucket) ->
     supervisor:start_link(?MODULE, [Bucket]).

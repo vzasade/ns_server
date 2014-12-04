@@ -27,6 +27,15 @@
          start_link_xdcr/0,
          proxy_server_name/1]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {worker, ?MODULE, {name, proxy_server_name(Bucket)}, {bucket, Bucket},
+     "entry point for document replicators from other nodes. resides" ++
+         " on ns_server nodes, accepts pushed document changes from document" ++
+         " replicators from other nodes and forwards them to the document" ++
+         " manager that runs on ns_couchdb node"}.
+
 start_link_xdcr() ->
     proc_lib:start_link(erlang, apply, [fun start_proxy_loop/1, [xdcr]]).
 

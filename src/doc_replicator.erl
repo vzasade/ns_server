@@ -23,6 +23,12 @@
 
 -export([start_link/1, start_link_xdcr/0, server_name/1]).
 
+-export([doc/1]).
+
+doc(Bucket) ->
+    {worker, ?MODULE, {name, server_name(Bucket)}, {bucket, Bucket},
+     "process responsible for pushing document changes to other nodes"}.
+
 start_link_xdcr() ->
     proc_lib:start_link(erlang, apply, [fun start_loop/1, [xdcr]]).
 

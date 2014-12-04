@@ -28,6 +28,13 @@
          wait_index_updated/2, initiate_indexing/1, reset_master_vbucket/1,
          get_safe_purge_seqs/1, foreach_doc/3, update_doc/2]).
 
+-export([doc/2]).
+
+doc(Node, Bucket) ->
+    {gen_server, ?MODULE, {name, server(Bucket)}, {bucket, Bucket}, {since, "2.0"}, {runs_on, Node},
+     "changes state of set indexes so that indexing covers active and only active vbuckets." ++
+         " Plus keeps track of all ddocs and replicates them across the cluster."}.
+
 -include("couch_db.hrl").
 -include_lib("couch_set_view/include/couch_set_view.hrl").
 -include("ns_common.hrl").

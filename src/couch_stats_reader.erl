@@ -50,6 +50,11 @@
 %% Amount of time to wait between fetching stats
 -define(SAMPLE_INTERVAL, 5000).
 
+-export([doc/2]).
+
+doc(Node, Bucket) ->
+    {gen_server, ?MODULE, {name, server(Bucket)}, {runs_on, Node}, {since, "2.0"},
+     "samples & keeps some couch stats so that stats_collector can get them quickly"}.
 
 start_link_remote(Node, Bucket) ->
     misc:start_link(Node, misc, turn_into_gen_server,

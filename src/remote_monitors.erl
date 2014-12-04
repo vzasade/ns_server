@@ -28,10 +28,15 @@
 
 -export([start_link/0, monitor/1, register_node_renaming_txn/1, wait_for_net_kernel/0]).
 
+-export([doc_wait_for_net_kernel/0]).
+
 -record(state, {node_renaming_txn_mref :: undefined | reference(),
                 monitors :: [] | [pid()]
                }).
 
+doc_wait_for_net_kernel() ->
+    {transient, {'fun', ?MODULE, wait_for_net_kernel},
+     "wait for net_kernel to start"}.
 init([]) ->
     {ok, #state{node_renaming_txn_mref = undefined,
                 monitors = []}}.
