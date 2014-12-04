@@ -25,6 +25,19 @@
 
 -export([init/1]).
 
+-define(SUBSCRIPTION_SPEC_NAME, buckets_observing_subscription).
+
+-export([doc/1]).
+
+doc(SingleBucketSup) ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     "children are dynamic, but lets assume we have bucket 'default'",
+     [
+      {pubsub_link, ?SUBSCRIPTION_SPEC_NAME, {to, ns_config_events},
+       "observes config for buckets that should be started/stopped" ++
+           " on this node and submits work for doing that to ns_bucket_worker"},
+      SingleBucketSup:doc("default")
+     ]}.
 
 %% API
 start_link(SingleBucketSup) ->
@@ -32,8 +45,6 @@ start_link(SingleBucketSup) ->
 
 
 %% supervisor callbacks
-
--define(SUBSCRIPTION_SPEC_NAME, buckets_observing_subscription).
 
 init([SingleBucketSup]) ->
     SubscriptionChild = {?SUBSCRIPTION_SPEC_NAME,

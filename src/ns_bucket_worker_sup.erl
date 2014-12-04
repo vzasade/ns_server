@@ -20,6 +20,15 @@
 -export([start_link/1]).
 -export([init/1]).
 
+-export([doc/1]).
+
+doc(SingleBucketSup) ->
+    {supervisor, ?MODULE, {mode, one_for_all},
+     [
+      {work_queue, ns_bucket_worker},
+      ns_bucket_sup:doc(SingleBucketSup)
+     ]}.
+
 start_link(SingleBucketSup) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, [SingleBucketSup]).
 
