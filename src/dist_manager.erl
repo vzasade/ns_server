@@ -29,12 +29,18 @@
 -export([adjust_my_address/2, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0]).
 
+-export([doc/0]).
+
 -record(state, {self_started,
                 user_supplied,
                 my_ip}).
 
 -define(WAIT_FOR_ADDRESS_ATTEMPTS, 10).
 -define(WAIT_FOR_ADDRESS_SLEEP, 1000).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "manages changing of node's address. Persists node's address when it's changed"}.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

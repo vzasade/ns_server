@@ -19,10 +19,13 @@
 
 -include("ns_common.hrl").
 
--export([start_link/0]).
+-export([start_link/0, doc/0]).
 
 start_link() ->
     ?log_info("OS type: ~p Version: ~p~nRuntime info: ~p",
               [os:type(), os:version(), ns_info:runtime()]),
     ?log_info("Manifest:~n~p~n", [diag_handler:manifest()]),
     ignore.
+
+doc() ->
+    {tmp, ?MODULE, "logs information about the OS"}.

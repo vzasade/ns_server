@@ -60,11 +60,16 @@
          counter_inc/1]).
 
 -export([alert_key/1]).
+
+-export([doc/0]).
 -record(state, {}).
 
 %%
 %% API
 %%
+
+doc() ->
+    {gen_server, ?MODULE, "performs node join/leave requests"}.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

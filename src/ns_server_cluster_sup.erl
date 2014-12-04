@@ -18,7 +18,7 @@
 -behavior(supervisor).
 
 %% API
--export ([start_link/0, restart/0]).
+-export ([start_link/0, restart/0, doc/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -60,6 +60,20 @@ init([]) ->
            {ns_server_nodes_sup, {ns_server_nodes_sup, start_link, []},
             permanent, infinity, supervisor, [ns_server_nodes_sup]}
           ]}}.
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     [
+      local_tasks:doc("maintains compaction tasks"),
+      log_os_info:doc(),
+      timeout_diag_logger:doc(),
+      dist_manager:doc(),
+      ns_cookie_manager:doc(),
+      ns_cluster:doc(),
+      ns_config_sup:doc(),
+      {worker, vbucket_filter_changes_registry},
+      ns_server_nodes_sup:doc()
+     ]}.
 
 restart() ->
     %% NOTE: starting and stopping in usual way is surprisingly

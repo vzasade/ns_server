@@ -32,6 +32,7 @@
 
 -export([ns_log_cat/1, ns_log_code_string/1]).
 
+-export([doc/0]).
 
 -define(SERVER, ?MODULE).
 -record(state, {}).
@@ -39,6 +40,11 @@
 -define(COOKIE_INHERITED, 1).
 -define(COOKIE_SYNCHRONIZED, 2).
 -define(COOKIE_GEN, 3).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "saves node's name and cookie. So that service shutdown can reach us. Guards node's" ++
+         " cookie changes as well"}.
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).

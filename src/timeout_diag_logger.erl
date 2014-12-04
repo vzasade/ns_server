@@ -28,6 +28,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([doc/0]).
+
 -define(MIN_LOG_INTERVAL, 5000).
 
 -record(state, {last_tstamp}).
@@ -35,6 +37,11 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+doc() ->
+    {gen_server, ?MODULE,
+     "keeps track of blocks of code that are observed for timeouts. If anything takes " ++
+         "longer then expected it'll log lots of details so that we can diagnose reason of timeout"}.
 
 log_diagnostics(Err) ->
     Pid = erlang:whereis(?MODULE),
