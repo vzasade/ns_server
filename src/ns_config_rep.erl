@@ -50,6 +50,18 @@
 
 -export([get_remote/2]).
 
+-export([doc/0, doc_merger/0]).
+
+doc() ->
+    {gen_server, ?MODULE, "replicates entire & parts of config to/from other nodes",
+     [{event_handler, ns_node_disco_rep_events, {to, ns_node_disco_events},
+       "requests complete config replication to/from newly discovered nodes"}]}.
+
+doc_merger() ->
+    {worker, {'fun', ?MODULE, start_link_merger},
+     "worker process that does actual config merging and updates config via" ++
+         " ns_config:cas_remote_config/2"}.
+
 -record(state, {}).
 
 start_link() ->

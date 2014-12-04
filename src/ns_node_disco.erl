@@ -54,6 +54,13 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "fires ns_node_disco_events and guards (do we still need that ?)" ++
+         " access to nodes_wanted"}.
+
 % Node Discovery and monitoring.
 %
 start_link() ->

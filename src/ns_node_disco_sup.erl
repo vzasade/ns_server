@@ -21,6 +21,19 @@
 
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, rest_for_one},
+     [
+      {gen_event, ns_node_disco_events, "fired when nodes() or nodes_wanted() changes"},
+      ns_node_disco:doc(),
+      ns_node_disco_log:doc(),
+      ns_node_disco_conf_events:doc(),
+      ns_config_rep:doc_merger(),
+      ns_config_rep:doc()
+     ]}.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

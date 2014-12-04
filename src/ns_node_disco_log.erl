@@ -25,6 +25,12 @@
 
 -include("ns_common.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {event_handler, ?MODULE, {to, ns_node_disco_events},
+     "logs nodes_wanted and actual nodes() changes"}.
+
 -record(state, {}).
 
 start_link() ->

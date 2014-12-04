@@ -25,6 +25,12 @@
 
 -record(state, {}).
 
+-export([doc/0]).
+
+doc() ->
+    {event_handler, ?MODULE, {to, ns_config_events},
+     "passes config changes to ns_config_rep for replication"}.
+
 start_link() ->
     % The ns_node_disco_conf_events gen_event handler will inform
     % me when relevant ns_config configuration changes.
