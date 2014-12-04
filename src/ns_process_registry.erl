@@ -26,6 +26,13 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([doc/1]).
+
+doc(Name) ->
+    {gen_server, ?MODULE, {name, Name},
+     "simple registry that maps arbitrary terms to processes and" ++
+         " automatically cleans up entries for dead processes"}.
+
 -record(state, {
           name :: atom(),
           pids2ids,

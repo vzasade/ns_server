@@ -84,6 +84,12 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([doc/1]).
+
+doc(BucketName) ->
+    {gen_server, ?MODULE, {bucket, BucketName}, {name, server_name(BucketName)}, {since, "2.0"},
+     "applies replication and vbucket state changes decided by janitor and vbuckets mover"}.
+
 wait_for_bucket_creation(Bucket, Nodes) ->
     NodeRVs = wait_for_memcached(Nodes, Bucket, up, ?WAIT_FOR_MEMCACHED_SECONDS),
     BadNodes = [N || {N, R} <- NodeRVs,

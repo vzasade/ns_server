@@ -22,9 +22,22 @@
 
 -export([start_link/1, init/1, get_registry_pid/1]).
 
+-export([doc/1]).
+
+doc(BucketName) ->
+    {supervisor, ?MODULE, {bucket, BucketName}, {name, server_name(BucketName)}, {mode, one_for_all},
+     "suprevisor for janitor_agent and all the processes that need to be terminated" ++
+         " if janitor agent gets killed",
+     [
+      ns_process_registry:doc(get_registry_name(BucketName)),
+      janitor_agent:doc(BucketName)
+     ]}.
+
+server_name(BucketName) ->
+    list_to_atom(atom_to_list(?MODULE) ++ "-" ++ BucketName).
+
 start_link(BucketName) ->
-    Name = list_to_atom(atom_to_list(?MODULE) ++ "-" ++ BucketName),
-    supervisor:start_link({local, Name}, ?MODULE, [BucketName]).
+    supervisor:start_link({local, server_name(BucketName)}, ?MODULE, [BucketName]).
 
 init([BucketName]) ->
     {ok, {{one_for_all,
