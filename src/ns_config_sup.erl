@@ -17,11 +17,23 @@
 
 -behavior(supervisor).
 
--export([start_link/0]).
+-export([start_link/0, doc/0]).
 
 -export([init/1]).
 
 -include("ns_common.hrl").
+
+doc() ->
+    {supervisor, ?MODULE, {mode, rest_for_one},
+     [
+      {gen_event, ns_config_events, "fired when any ns_config variable is changed"},
+      {gen_event, ns_config_events_local,
+       "fired when any ns_config variable is changed locally (i.e. not replicated from other" ++
+           " node, but genuinely changed on this node"},
+      ns_config:doc("Manages loading and (async) saving."),
+      ns_config_replica:doc(),
+      ns_config_log:doc()
+     ]}.
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).

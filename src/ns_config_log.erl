@@ -23,12 +23,17 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, sanitize/1]).
 
+-export([doc/0]).
+
 -include("ns_common.hrl").
 
 -record(state, {buckets=[]}).
 
 %% state sanitization
 -export([format_status/2]).
+
+doc() ->
+    {gen_server, ?MODULE, "logs config changes"}.
 
 format_status(_Opt, [_PDict, State]) ->
     sanitize(State).
