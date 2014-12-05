@@ -32,6 +32,15 @@
 
 -define(TASK_CHECK_TIMEOUT, 5000).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_all},
+     [
+      cluster_logs_collection_task:doc_ets_holder(),
+      cluster_logs_collection_task:doc()
+     ]}.
+
 init([]) ->
     {ok, {{one_for_all, 10, 10},
           [{ets_holder, {cluster_logs_collection_task, start_link_ets_holder, []},

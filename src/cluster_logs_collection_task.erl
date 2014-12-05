@@ -27,6 +27,14 @@
 -export([start_collection_per_node/3,
          start_upload_per_node/4]).
 
+-export([doc/0, doc_ets_holder/0]).
+
+doc_ets_holder() ->
+    {worker, {'fun', ?MODULE, start_link_ets_holder}}.
+
+doc() ->
+    {worker, {'fun', ?MODULE, start_link}}.
+
 start_link(Nodes, BaseURL) ->
     proc_lib:start_link(erlang, apply, [fun collect_cluster_logs/2, [Nodes, BaseURL]]).
 
