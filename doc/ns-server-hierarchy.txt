@@ -1,297 +1,424 @@
-;; -*- Mode: lisp; fill-column: 120 -*-
+%%% -*- Mode: erlang -*-
 
-(supervisor 'ns_server_cluster_sup :mode :one_for_one
-            (supervisor 'cb_couch_sup :mode :one_for_one :since "2.0"
-                        (supervisor 'couch_app))
-            (tmp 'cb_init_loggers)
-            (tmp 'log_os_info)
-            (gen-server 'timeout_diag_logger
-                        "keeps track of blocks of code that are observed for timeouts. If anything takes
-                        longer then expected it'll log lots of details so that we can diagnose reason of
-                        timeout")
-            (gen-server 'dist_manager
-                        "manages changing of node's address. Persists node's address when it's changed")
-            (gen-server 'ns_cookie_manager
-                        "saves node's name and cookie. So that service shutdown can reach us. Guards node's
-                        cookie changes as well")
-            (gen-server 'ns_cluster
-                        "performs node join/leave requests")
-            (supervisor 'ns_config_sup :mode :rest_for_one
-                        (gen-event 'ns_config_events
-                                   "fired when any ns_config variable is changed")
-                        (gen-event 'ns_config_events_local :since "1.8.1"
-                                   "fired when any ns_config variable is changed locally (i.e. not replicated from other
-                                   node, but genuinely changed on this node")
-                        (gen-server 'ns_config
-                                    "maintains local ns_config. Manages loading and (async) saving. Fires
-                                    ns_config_events when any config variable is changed")
-                        (gen-server 'ns_config_remote
-                                    "proxy for ns_config. Why? Because we've found that replying to remote
-                                    ns_config:get() calls may suspend replying process. Thus we have that
-                                    proxy for 'spoonfeeding' of remote callers")
-                        (gen-server 'ns_config_log
-                                    "logs config changes"
-                                    (pubsub-link nil :to 'ns_config_events))
-                        (gen-server 'cb_config_couch_sync :since "2.0"
-                                    "syncs important ns_config variables into couch config"
-                                    (pubsub-link nil :to 'ns_config_events)))
-            (worker 'vbucket_filter_changes_registry)
-            (supervisor 'ns_server_sup :mode :one_for_one
-                        (transient 'setup_babysitter_node '(ns_server setup_babysitter_node)
-                                   "Runs ns_server:setup_babysitter_node once which sets application environment
-                                   variable holding babysitter node name")
-                        (gen-server 'dir_size
-                                    "Spawns go du implementation as a port on supported OSes and implements quick
-                                     DU (directory size) service via that port")
-                        (gen-server 'ns_log)
-                        (worker 'ns_crash_log_consumer '(ns_log start_link_crash_consumer)
-                                "eats crash records from babysitter's ns_crash_log service and ns_log-s them")
-                        (gen-server 'ns_config_isasl_sync
-                                    "saves bucket passwords to isasl.pw"
-                                    (pubsub-link nil :to 'ns_config_events))
-                        (gen-event 'ns_log_events
-                                   "ns_log logged events are broadcasted here. ns_mail_log uses it")
-                        (supervisor 'ns_node_disco_sup :mode :rest_for_one
-                                    (gen-event 'ns_node_disco_events
-                                               "fired when nodes() or nodes_wanted() changes")
-                                    (gen-server 'ns_node_disco
-                                                "fires ns_node_disco_events and guards (do we still need that ?)
-                                                access to nodes_wanted")
-                                    (event-handler 'ns_node_disco_log :to 'ns_node_disco_events
-                                                   "logs nodes_wanted and actual nodes() changes")
-                                    (event-handler 'ns_node_disco_conf_events :to 'ns_config_events
-                                                   "passes config changes to ns_config_rep for replication")
-                                    (worker 'ns_config_rep_merger
-                                            "worker process that does actual config merging and updates config via
-                                            ns_config:cas_remote_config/2. See ns_config_rep.erl")
-                                    (gen-server 'ns_config_rep
-                                                "replicates entire & parts of config to/from other nodes"
-                                                (event-handler 'ns_node_disco_rep_events :to 'ns_node_disco_events
-                                                               "requests complete config replication to/from
-                                                               newly discovered nodes")))
-                        (work_queue 'vbucket_map_mirror :since "2.0"
-                                    "maintains ets cache of vbucket map for faster view merger params generation. Also
-                                    caches capi_url(Node)")
-                        (work_queue 'bucket_info_cache :since "2.5"
-                                    "maintains ets cache of terse bucket details"
-                                    (gen-event 'bucket_info_cache_invalidations :since "2.5"
-                                               "fired when any bucket info is invalidated"))
-                        (gen-event 'ns_tick_event
-                                   "local tick event. Singleton ns_tick on master node will fire tick events
-                                   on all nodes")
-                        (gen-event 'buckets_events
-                                   "fired when bucket is started/warmed-up/shutdown. Also fired by ns_doctor
-                                   when remote bucket startup/warmup/shutdown discovered")
-                        (supervisor 'ns_mail_sup :mode :one_for_all
-                                    "sends out mails for 'alertful' ns_log entries"
-                                    (gen-server 'ns_mail)
-                                    (event-handler 'ns_mail_log :to 'ns_log_events))
-                        (gen-event 'ns_stats_event
-                                   "various stats collectors (for all buckets) fire newly gathered stats
-                                   samples via this guy") ; NOTE: 1.8.1 spawns this a bit later
-                        (gen-server 'ns_heart
-                                    "gathers local stats & other info and broadcasts that to all node's ns_doctor")
-                        (gen-server 'ns_doctor
-                                    "keeps track of latest heartbeats from other nodes")
-                        (gen-server 'remote_clusters_info
-                                    "service to query and cache remote clusters information (cluster nodes and vbucket
-                                    maps in particular")
-                        (gen-fsm 'mb_master
-                                 ;; NOTE: the following is just spawn_link relation
-                                 (supervisor 'mb_master_sup :mode :one_for_one
-                                             (gen-fsm (:global 'ns_orchestrator)
-                                                      ;; failover is done on orchestrator process itself
-                                                      (notable-call 'ns_rebalancer 'failover/1)
-                                                      ;; but rebalance is separate process
-                                                      (spawns 'ns_rebalancer 'rebalance/3)
-                                                      ;; and janitor is separate as well
-                                                      (spawns 'ns_janitor 'cleanup/2))
-                                             (gen-server (:global 'ns_tick))
-                                             (gen-server (:global 'auto_failover))))
-                        (gen-event 'master_activity_events
-                                   "Timestamped master activity events. Real data only on master node.")
-                        (gen-event 'master_activity_events_ingress
-                                   "Raw master activity events. Remote nodes send their stuff to master's ingress events process")
-                        (pubsub-link 'master_activity_events_timestamper :to 'master_activity_events_ingress
-                                     "adds timestamps to ingress events also serves queued note_xxx requests
-                                     by sending them to ingress process on master")
-                        (gen-server 'master_activity_events_pids_watcher)
-                        (gen-server 'master_activity_events_keeper
-                                    "local 'archive' of recent master events. Keeps 8k of recent events. Only
-                                    relevant on master node.")
-                        (supervisor 'menelaus_sup :mode :one_for_one
-                                    (worker 'menelaus_web)
-                                    (gen-server 'menelaus_web_alerts_srv)
-                                    (event-handler 'menelaus_event
-                                                   :to ns_config_events
-                                                   :to ns_node_disco_events))
-                        (worker 'ns_ports_setup '(ns_ports_setup start)
-                                "build list of port servers (with full command line and environment) and passes it to
-                                babysitter's ns_child_ports_sup. It links to babysitter's ns_child_ports_sup.  And
-                                reacts on ns_config changes in order to reconfigure set of servers we need to run.
+%%% hierarchy on ns_server node
+{supervisor,ns_server_cluster_sup,
+ {mode,one_for_one},
+ [{gen_server,local_tasks,"maintains compaction tasks"},
+  {tmp,log_os_info,"logs information about the OS"},
+  {gen_server,timeout_diag_logger,
+   "keeps track of blocks of code that are observed for timeouts. If anything takes longer then expected it'll log lots of details so that we can diagnose reason of timeout"},
+  {gen_server,dist_manager,
+   "manages changing of node's address. Persists node's address when it's changed"},
+  {gen_server,ns_cookie_manager,
+   "saves node's name and cookie. So that service shutdown can reach us. Guards node's cookie changes as well"},
+  {gen_server,ns_cluster,"performs node join/leave requests"},
+  {supervisor,ns_config_sup,
+   {mode,rest_for_one},
+   [{gen_event,ns_config_events,
+     "fired when any ns_config variable is changed"},
+    {gen_event,ns_config_events_local,
+     "fired when any ns_config variable is changed locally (i.e. not replicated from other node, but genuinely changed on this node"},
+    {gen_server,ns_config,
+     "maintains local ns_config. Fires ns_config_events when any config variable is changed Manages loading and (async) saving."},
+    {gen_server,ns_config_replica,
+     "proxy for ns_config. Why? Because we've found that replying to remote ns_config:get() calls may suspend replying process. Thus we have that proxy for 'spoonfeeding' of remote callers"},
+    {gen_server,ns_config_log,"logs config changes"}]},
+  {worker,vbucket_filter_changes_registry},
+  {supervisor,ns_server_nodes_sup,
+   {mode,rest_for_one},
+   [{transient,
+     {'fun',ns_server,setup_node_names},
+     "Sets babysitter and couchdb node names into the application env. Sets the cookie for ns_couchdb node"},
+    {gen_server,remote_monitors,
+     "server that allows to defer DOWN message from remote monitor in case if the net kernel is restarted till the start of the net kernel"},
+    {worker,
+     {'fun',ns_server_nodes_sup,start_couchdb_node},
+     "Port server for ns_couchdb node"},
+    {worker,
+     {'fun',ns_server_nodes_sup,wait_link_to_couchdb_node},
+     "Waits for ns_couchdb node to start and maintains remote monitor to the supervisor on that node"},
+    {transient,
+     {'fun',ns_storage_conf,setup_db_and_ix_paths},
+     "retrieves db and ix paths from couchdb node and stores them to application env"},
+    {supervisor,ns_server_sup,
+     {mode,one_for_one},
+     [{gen_server,ns_disksup,
+       "forked shortened version of R16 disksup. to include bind mounts into linux disk info"},
+      {work_queue,diag_handler_worker},
+      {gen_server,dir_size,
+       "Spawns go du implementation as a port on supported OSes and implements quick DU (directory size) service via that port"},
+      {gen_server,request_throttler},
+      {gen_server,ns_log},
+      {worker,
+       {'fun',ns_log,start_link_crash_consumer},
+       "eats crash records from babysitter's ns_crash_log service and ns_log-s them"},
+      {gen_server,ns_config_isasl_sync,"saves bucket passwords to isasl.pw",
+       [{pubsub_link,nil,{to,ns_config_events}}]},
+      {gen_event,ns_log_events,
+       "ns_log logged events are broadcasted here. ns_mail_log uses it"},
+      {supervisor,ns_node_disco_sup,
+       {mode,rest_for_one},
+       [{gen_event,ns_node_disco_events,
+         "fired when nodes() or nodes_wanted() changes"},
+        {gen_server,ns_node_disco,
+         "fires ns_node_disco_events and guards (do we still need that ?) access to nodes_wanted"},
+        {event_handler,ns_node_disco_log,
+         {to,ns_node_disco_events},
+         "logs nodes_wanted and actual nodes() changes"},
+        {event_handler,ns_node_disco_conf_events,
+         {to,ns_config_events},
+         "passes config changes to ns_config_rep for replication"},
+        {worker,
+         {'fun',ns_config_rep,start_link_merger},
+         "worker process that does actual config merging and updates config via ns_config:cas_remote_config/2"},
+        {gen_server,ns_config_rep,
+         "replicates entire & parts of config to/from other nodes",
+         [{event_handler,ns_node_disco_rep_events,
+           {to,ns_node_disco_events},
+           "requests complete config replication to/from newly discovered nodes"}]}]},
+      {gen_server,vbucket_map_mirror,
+       {since,"2.0"},
+       "maintains ets cache of vbucket map for faster view merger params generation. Alsocaches capi_url(Node)"},
+      {work_queue,bucket_info_cache,
+       {since,"2.5"},
+       "maintains ets cache of terse bucket details",
+       [{gen_event,bucket_info_cache_invalidations,
+         {since,"2.5"},
+         "fired when any bucket info is invalidated"}]},
+      {gen_event,ns_tick_event,
+       "local tick event. Singleton ns_tick on master node will fire tick events on all nodes"},
+      {gen_event,buckets_events,
+       "fired when bucket is started/warmed-up/shutdown. Also fired by ns_doctor when remote bucket startup/warmup/shutdown discovered"},
+      {supervisor,ns_mail_sup,
+       {mode,one_for_all},
+       "sends out mails for 'alertful' ns_log entries",
+       [{event_handler,ns_mail_log,{to,ns_log_events}}]},
+      {gen_event,ns_stats_event,
+       "various stats collectors (for all buckets) fire newly gathered stats samples via this guy. NOTE: 1.8.1 spawns this a bit later"},
+      {gen_server,samples_loader_tasks,
+       {since,"2.0"},
+       "babysits sample loading tasks and exposes them via tasks API"},
+      {supervisor,ns_heart_sup,
+       {mode,rest_for_one},
+       [{gen_server,ns_heart,
+         "gathers local stats & other info and broadcasts that to all node's ns_doctor"},
+        {worker,
+         {'fun',ns_heart,start_link_slow_updater},
+         "There's now separate process that listens to status update requests from main heartbeat process. And heartbeat process is only willing to wait for fresh slow status for heartbeat interval. In case slow status update takes longer than that, heartbeat sends last seen stale slow status."}]},
+      {gen_server,ns_doctor,
+       "keeps track of latest heartbeats from other nodes"},
+      {gen_server,remote_clusters_info,
+       "service to query and cache remote clusters information (cluster nodes and vbucket maps in particular"},
+      {gen_event,master_activity_events,
+       "Timestamped master activity events. Real data only on master node."},
+      {gen_fsm,mb_master,"NOTE: the following is just spawn_link relation",
+       [{supervisor,mb_master_sup,
+         {mode,one_for_one},
+         [{gen_fsm,
+           {global,ns_orchestrator},
+           [{notable_call,
+             {'fun',ns_rebalancer,failover},
+             "failover is done on orchestrator process itself"},
+            {spawns,
+             {'fun',ns_rebalancer,rebalance},
+             "but rebalance is separate process"},
+            {spawns,
+             {'fun',ns_janitor,cleanup},
+             "and janitor is separate as well"}]},
+          {gen_server,{global,ns_tick}},
+          {gen_server,{global,auto_failover}}]}]},
+      {gen_event,master_activity_events_ingress,
+       "Raw master activity events. Remote nodes send their stuff to master's ingress events process"},
+      {pubsub_link,master_activity_events_timestamper,
+       {to,master_activity_events_ingress},
+       "adds timestamps to ingress events also serves queued note_xxx requests  by sending them to ingress process on master"},
+      {gen_server,master_activity_events_pids_watcher},
+      {gen_server,master_activity_events_keeper,
+       "local 'archive' of recent master events. Keeps 8k of recent events. Only relevant on master node."},
+      {supervisor,menelaus_sup,
+       {mode,one_for_one},
+       [{supervisor,ns_ssl_services_sup,
+         {mode,rest_for_one},
+         [{gen_server,ns_ssl_services_setup},
+          {worker,
+           {'fun',ns_ssl_services_setup,start_link_rest_service},
+           "starts mochiweb_http on ssl rest port"}]},
+        {gen_server,menelaus_ui_auth,"ui token authentication server"},
+        {work_queue,menelaus_web_cache,
+         "This service maintains public ETS table that's caching various somewhat expensive to compute stuff used by menelaus_web"},
+        {gen_server,menelaus_stats_gatherer,
+         "this service is used to wait for sample_archived event on the particular node and then gather stats on this node and maybe on other nodes",
+         [{pubsub_link,nil,{to,ns_stats_event}}]},
+        {worker,menelaus_web},
+        {gen_server,menelaus_web_alerts_srv},
+        {event_handler,menelaus_event,
+         {to,ns_config_events},
+         {to,ns_node_disco_events}},
+        {gen_server,hot_keys_keeper,"keeps recent hot keys for easy access"}]},
+      {worker,ns_ports_setup,
+       "build list of port servers (with full command line and environment) and passes it to babysitter's ns_child_ports_sup. It links to babysitter's ns_child_ports_sup.  And reacts on ns_config changes in order to reconfigure set of servers we need to run. Those port servers are usually memcached and moxi and all per-port moxis"},
+      {gen_server,ns_memcached_sockets_pool,
+       "instance of ns_connection_pool for long blocking memcached calls"},
+      {gen_server,memcached_config_mgr,
+       "writes memcached.json and asks babysitter to actually start memcached. Also handles dynamic memcached config reloads."},
+      {pubsub_link,
+       {'fun',ns_ports_setup,memcached_force_killer_fn},
+       {to,ns_config_events},
+       "implements memcached die! signalling after failover"},
+      {gen_server,ns_memcached_log_rotator,
+       "periodically sweeps too old memcached.log.XXX-s"},
+      {gen_server,memcached_clients_pool,
+       "instance of ns_connection_pool for memcached requests of xmem"},
+      {gen_server,proxied_memcached_clients_pool,
+       "instance of ns_connection_pool for proxied memcached requests of xmem"},
+      {gen_server,xdc_lhttpc_pool,
+       "instance of lhttpc_manager used by xdcr lhttp requests"},
+      {gen_server,ns_null_connection_pool},
+      {supervisor,xdcr_sup,
+       {mode,one_for_all},
+       [{transient,
+         {'fun',remote_monitors,wait_for_net_kernel},
+         "wait for net_kernel to start"},
+        {worker,{'fun',xdcr_sup,link_stats_holder_body}},
+        {supervisor,xdc_replication_sup,
+         {mode,one_for_one},
+         "owns individual XDCR replications",
+         [{gen_server,xdc_replication,
+           "controls xdcr replication as a set of per-vbucket replicator",
+           [{pubsub_link,nil,
+             {to,ns_config_events},
+             "observes vbucket map of it's bucket and notifies parent xdc_replication about topology changes"},
+            {gen_server,new_concurrency_throttle,
+             {name,init_throttle},
+             "concurrency throttle for per-vbucket replications initalization"},
+            {gen_server,new_concurrency_throttle,
+             {name,work_throttle},
+             "concurrency throttle for per-vbucket replications replication"},
+            {gen_server,xdcr_opaque_checker,
+             "mass checks remote nodes for failover also mass checks local vbuckets highseqno and updates parent replicator seqnos remaining to replicate stats"},
+            {supervisor,xdc_vbucket_rep_sup,
+             {mode,one_for_one},
+             "dynamic. Lets show single child",
+             [{gen_server,xdc_vbucket_rep,
+               {trap_exit,t},
+               {interacts_with,init_throttle},
+               {interacts_with,work_throttle},
+               {interacts_with,remote_clusters_info},
+               "responsible for orchestrating replication of single vbucket (children are spawned only while actively replicating a batch of changes)",
+               [{gen_server,couch_work_queue,
+                 {trap_exit,nil},
+                 "holds docs to be picked up by workers and to be pushed onto remote end"},
+                {worker,changes_reader,
+                 {trap_exit,t},
+                 "pulls mutations via xdcr_dcp_streamer and puts them into couch_work_queue (see spawn_changes_reader)",
+                 [{worker,
+                   "xdcr_dcp_streamer has child process that does actual socket work"}]},
+                {worker,changes_manager,
+                 {trap_exit,nil},
+                 "intermediate process between rep workers and couch_work_queue also helps parent xdc_vbucket_rep to track which batches where handed out to workers (see spawn_changes_manager)"},
+                {worker,xdc_vbucket_rep_worker,
+                 {trap_exit,nil},
+                 "pulls batch of docs from changes manager and sends them out to remote end via xdc_vbucket_rep_xmem library. (there's by default 4 workers like this one)",
+                 [{worker,
+                   {trap_exit,nil},
+                   "There's temp process created per every xmem interaction (via misc:executing_on_new_process). This is due to nature of how socket pools work"}]}]}]}]}]},
+        {gen_server,xdc_rep_manager,
+         "starts/stops replications under xdc_replication_sup if the replication conf has changed. receives change notifications from xdc_rdoc_manager"},
+        {worker,doc_replicator,
+         {name,xdcr_doc_replicator},
+         {bucket,xdcr},
+         "process responsible for pushing document changes to other nodes"},
+        {worker,doc_replication_srv,
+         {name,xdc_rdoc_replication_srv},
+         {bucket,xdcr},
+         "entry point for document replicators from other nodes. resides on ns_server nodes, accepts pushed document changes from document replicators from other nodes and forwards them to the document manager that runs on ns_couchdb node"},
+        {gen_server,xdc_rdoc_manager,
+         {runs_on,ns_couchdb@ip},
+         {since,"3.2"},
+         "responsible for managing xdcr configuration documents (_replicator db)"}]},
+      {gen_server,xdcr_dcp_sockets_pool,
+       "pool of sockets that are used by xdcr dcp streaming"},
+      {supervisor,ns_bucket_worker_sup,
+       {mode,one_for_all},
+       [{work_queue,ns_bucket_worker},
+        {supervisor,ns_bucket_sup,
+         {mode,one_for_one},
+         "children are dynamic, but lets assume we have bucket 'default'",
+         [{pubsub_link,buckets_observing_subscription,
+           {to,ns_config_events},
+           "observes config for buckets that should be started/stopped on this node and submits work for doing that to ns_bucket_worker"},
+          {supervisor,single_bucket_sup,
+           {mode,one_for_one},
+           {bucket,"default"},
+           [{supervisor,docs_sup,
+             {bucket,"default"},
+             {mode,one_for_all},
+             "suprevisor for starting couchdb related processes for bucket on ns_couchdb node and views replication",
+             [{transient,
+               {'fun',remote_monitors,wait_for_net_kernel},
+               "wait for net_kernel to start"},
+              {worker,doc_replicator,
+               {name,'capi_doc_replicator-default'},
+               {bucket,"default"},
+               "process responsible for pushing document changes to other nodes"},
+              {worker,doc_replication_srv,
+               {name,'capi_ddoc_replication_srv-default'},
+               {bucket,"default"},
+               "entry point for document replicators from other nodes. resides on ns_server nodes, accepts pushed document changes from document replicators from other nodes and forwards them to the document manager that runs on ns_couchdb node"},
+              {gen_server,capi_set_view_manager,
+               {name,'capi_set_view_manager-default'},
+               {bucket,"default"},
+               {since,"2.0"},
+               {runs_on,ns_couchdb_node@ip},
+               "changes state of set indexes so that indexing covers active and only active vbuckets. Plus keeps track of all ddocs and replicates them across the cluster."},
+              {gen_server,couch_stats_reader,
+               {name,'couch_stats_reader-default'},
+               {runs_on,ns_couchdb_node@ip},
+               {since,"2.0"},
+               "samples & keeps some couch stats so that stats_collector can get them quickly"}]},
+            {supervisor,ns_memcached_sup,
+             {bucket,"default"},
+             {mode,rest_for_one},
+             "supervisor for ns_memcahced and the processes that have to be restarted if ns_memcached is restarted",
+             [{gen_server,ns_memcached,
+               {bucket,"default"},
+               {name,'ns_memcached-default'},
+               "our communication channel with bucket. Creates bucket on startup. Monitors it for warmup. Monitors bucket parameters versus config (i.e. if bucket quota needs to be adjusted). Performs requests to grab stats and change vbucket states. Since 1.8.1 we maintain pool of workers and each worker has 1 connection to memcached. Main process is passing requests to workers in pool trying to be smart about queuing."},
+              {work_queue,terse_bucket_info_uploader,
+               {bucket,"default"},
+               {name,'terse_bucket_info_uploader-default'},
+               "observes invalidations of bucket info cache and uploads fresh test bucket details to ep-engine",
+               [{pubsub_link,nil,{to,bucket_info_cache_invalidations}}]}]},
+            {supervisor,ns_vbm_sup,
+             {mode,one_for_one},
+             {name,'ns_vbm_sup-default'},
+             {bucket,"default"},
+             "hosts replication ebucketmigrators for 2.0 'replicators on destination'"},
+            {supervisor,dcp_sup,
+             {bucket,"default"},
+             {name,'dcp_sup-default'},
+             {since,"3.0"},
+             {mode,one_for_one},
+             "hosts and manages dcp replicators",
+             [{gen_server,dcp_replicator,
+               {bucket,"default"},
+               {node,node@ip},
+               {name,'dcp_replicator-default-node@ip'},
+               {since,"3.0"},
+               "implements frontend for dcp replication proxy",
+               [{gen_server,dcp_consumer_conn,
+                 {bucket,"default"},
+                 {node,node@ip},
+                 {since,"3.0"},
+                 "implements consumer side of dcp replication proxy"},
+                {gen_server,dcp_producer_conn,
+                 {bucket,"default"},
+                 {node,node@ip},
+                 {since,"3.0"},
+                 "implements producer side of dcp replication proxy"}]}]},
+            {gen_server,replication_manager,
+             {name,'replication_manager-default'},
+             {bucket,"default"},
+             {since,"3.0"},
+             "keeps track of desired replications. Routes replication work between tap and dcp depending on bucket replication type.",
+             [{gen_server,tap_replication_manager,
+               {name,'tap_replication_manager-default'},
+               {bucket,"default"},
+               "implements tap portion of replication manager. Serializes replication changes w.r.t. not-ready-vbuckets restarts."}]},
+            {gen_server,dcp_notifier,
+             {name,'dcp_notifier-default'},
+             {bucket,"default"},
+             {since,"3.0"},
+             "note: it's part of data path. Allows xdcr-over-xmem to check/wait until vbucket has greater seqno then xdcr consumed. Only applies to couchbase buckets"},
+            {supervisor,janitor_agent_sup,
+             {bucket,"default"},
+             {name,'janitor_agent_sup-default'},
+             {mode,one_for_all},
+             "suprevisor for janitor_agent and all the processes that need to be terminated if janitor agent gets killed",
+             [{gen_server,ns_process_registry,
+               {name,'rebalance_subprocesses_registry-default'},
+               "simple registry that maps arbitrary terms to processes and automatically cleans up entries for dead processes"},
+              {gen_server,janitor_agent,
+               {bucket,"default"},
+               {name,'janitor_agent-default'},
+               {since,"2.0"},
+               "applies replication and vbucket state changes decided by janitor and vbuckets mover"}]},
+            {gen_server,stats_collector,
+             {bucket,"default"},
+             "on each tick grabs memcached stats parses/massages them a bit and sends them out to ns_stats_event",
+             [{pubsub_link,nil,{to,ns_tick_event}}]},
+            {gen_server,stats_archiver,
+             {bucket,"default"},
+             "saves stats for this bucket that it sees on ns_stats_event",
+             [{pubsub_link,nil,{to,ns_stats_event}}]},
+            {gen_server,stats_reader,
+             {bucket,"default"},
+             "used to read stats archive"},
+            {event_handler,failover_safeness_level,
+             {bucket,"default"},
+             {to,ns_stats_event},
+             "estimates bucket's replication up-to-date-ness 'from this node' based on stats it sees"}]}]}]},
+      {gen_server,system_stats_collector},
+      {gen_server,stats_archiver,
+       {bucket,"@system"},
+       "saves stats for this bucket that it sees on ns_stats_event",
+       [{pubsub_link,nil,{to,ns_stats_event}}]},
+      {gen_server,stats_reader,
+       {bucket,"@system"},
+       "used to read stats archive"},
+      {gen_fsm,compaction_daemon,
+       "stab for compatibility with pre 3.0 nodes, that call compaction_daemon remotely as an fsm"},
+      {gen_server,compaction_new_daemon,
+       {since,"3.0"},
+       "triggers and monitors bucket's db and views compaction"},
+      {supervisor,cluster_logs_sup,
+       {mode,one_for_all},
+       [{worker,{'fun',cluster_logs_collection_task,start_link_ets_holder}},
+        {worker,{'fun',cluster_logs_collection_task,start_link}}]}]}]}]}.
 
-                                Those port servers are usually memcached and moxi and all per-port moxis")
-                        (supervisor 'ns_port_sup :mode :one_for_one
-                                    (event-handler 'ns_port_init :to 'ns_config_events)
-                                    ;; dynamic, but typically memcached & moxi ports. Those are in fact
-                                    ;; started through supervisor_cushion
-                                    (gen_server 'ns_port_server "memcached")
-                                    (gen_server 'ns_port_server "moxi"))
-                        (gen-server 'ns_memcached_sockets_pool
-                                    "instance of ns_connection_pool for long blocking memcached calls")
-                        (gen-server 'memcached_config_mgr
-                                    "writes memcached.json and asks babysitter to actually start memcached."
-                                    "Also handles dynamic memcached config reloads.")
-                        (event-handler 'ns_port_memcached_killer :to ns_config_events
-                                       "implements memcached die! signalling after failover")
-                        (gen-server 'memcached_clients_pool
-                                    "instance of ns_connection_pool for memcached requests of xmem")
-                        (gen-server 'xdc_lhttpc_pool
-                                    "instance of lhttpc_manager used by xdcr lhttp requests")
-                        (gen-server 'ns_memcached_log_rotator
-                                    "periodically sweeps too old memcached.log.XXX-s")
-                        (gen-server 'ns_bucket_worker
-                                    "'work' of starting and shutting down ns_bucket_sup childs is done by this
-                                    guy. I.e. because supervisor:xxx API is synchronous")
-                        (supervisor 'xdcr_sup :mode :rest_for_one
-                                    (worker 'xdc_stats_holder
-                                            "owns xdcr stats ets table")
-                                    (supervisor
-                                     'xdc_replication_sup :mode :one_for_one
-                                     "owns individual XDCR replications"
-                                     ;; dynamic, but lets assume single replication
-                                     (gen_server '(xdc_replication #<rep>)
-                                                 "controls xdcr replication as a set of per-vbucket replicators"
-                                                 (pubsub-link :to 'ns_config_events
-                                                              "observes vbucket map of it's bucket and notifies parent
-                                                              xdc_replication about topology changes")
-                                                 (gen_server '(new_concurrency_throttle 'init_throttle)
-                                                             "concurrency throttle for per-vbucket
-                                                                        replications initalization")
-                                                 (gen_server '(new_concurrency_throttle 'work_throttle)
-                                                             "concurrency throttle for per-vbucket
-                                                                        replications replication")
-                                                 (gen_server 'xdcr_opaque_checker
-                                                             "mass checks remote nodes for failover"
-                                                             "also mass checks local vbuckets highseqno and updates
-                                                             parent replicator 'seqnos remaining to replicate stats")
-                                                 ;; dynamic. Lets show single child
-                                                 (supervisor 'xdc_vbucket_rep_sup :mode :one_for_one
-                                                             (gen_server '(xdc_vbucket_rep #<... vbucket id and other args>)
-                                                                         "responsible for orchestrating replication of
-                                                                          single vbucket"
-                                                                         :trap_exit t
-                                                                         :interacts-with 'init_throttle
-                                                                         :interacts-with 'work_throttle
-                                                                         :interacts-with 'remote_clusters_info
-                                                                         ;; childs are spawned only while actively
-                                                                         ;; replicating a batch of changes
-                                                                         (gen_server 'couch_work_queue
-                                                                                     "holds docs to be picked up by
-                                                                                      workers and to be pushed onto
-                                                                                      remote end"
-                                                                                     :trap_exit nil)
-                                                                         (worker 'changes_reader ;; see spawn_changes_reader
-                                                                                 "pulls mutations via xdcr_dcp_streamer and puts them into couch_work_queue"
-                                                                                 :trap_exit t
-                                                                                 (worker "xdcr_dcp_streamer has child process that does actual socket work"
-                                                                                         :trap_exit nil))
-                                                                         (worker 'changes_manager ;; see spawn_changes_manager
-                                                                                 "intermediate process between rep workers and couch_work_queue"
-                                                                                 "also helps parent xdc_vbucket_rep to track which batches where handed out to workers"
-                                                                                 :trap_exit nil)
-                                                                         (worker '(xdc_vbucket_rep_worker 1) ;; there's by default 4 workers like this one
-                                                                                 "pulls batch of docs from changes manager and sends them out to remote end
-                                                                                  (via xdc_vbucket_rep_xmem library)"
-                                                                                 :trap_exit nil
-                                                                                 (worker "There's temp process created per every xmem interaction"
-                                                                                         "(via misc:executing_on_new_process)."
-                                                                                         "This is due to nature of how socket pools work"
-                                                                                         :trap_exit nil))))))
-                                    (gen-server 'xdc_rep_manager
-                                                "monitors _replicator db for replications. And starts/stops replications
-                                                under xdc_replication_sup"))
-                        (supervisor 'ns_bucket_sup :mode :one_for_one
-                                    (pubsub-link 'buckets_observing_subscription :to 'ns_config_events
-                                                 "observes config for buckets that should be started/stopped
-                                                 on this node and submits work for doing that to ns_bucket_worker")
-                                    ;; dynamic, but lets assume we have bucket "default"
-                                    (worker '(per_bucket_sup "default")
-                                            (supervisor 'single_bucket_sup :mode :rest_for_one
-                                                        (gen-server '(capi_set_view_manager "default") :since "2.0"
-                                                                    "changes state of set indexes so that indexing
-                                                                     covers active and only active vbuckets. Plus keeps
-                                                                     track of all ddocs and replicates them across the
-                                                                     cluster."
-                                                                    (worker :name 'capi_ddoc_replication_srv-default
-                                                                            "In order to avoid breaking backwards compat
-                                                                             with C-release all ddoc replication casts
-                                                                             are actually sent to this guy, which merely
-                                                                             proxies them to capi_set_view_manager"))
-                                                        (gen-server '(ns_memcached "default") :name 'ns_memcached-default
-                                                                    "our communication channel with bucket. Creates
-                                                                     bucket on startup. Monitors it for warmup. Monitors
-                                                                     bucket parameters versus config (i.e. if bucket
-                                                                     quota needs to be adjusted). Performs requests to
-                                                                     grab stats and change vbucket states. Since 1.8.1
-                                                                     we maintain pool of workers and each worker has 1
-                                                                     connection to memcached. Main process is passing
-                                                                     requests to workers in pool trying to be smart
-                                                                     about queuing.")
-                                                        (gen_server '(replication_manager "default") :name 'replication_manager-default :since "3.0"
-                                                                    "keeps track of desired replications. Routes
-                                                                    replication work between tap and dcp depending
-                                                                    on bucket replication type.")
-                                                                    (gen_server '(tap_replication_manager "default") :name 'tap_replication_manager-default
-                                                                                "implements tap portion of replication manager.
-                                                                                 Serializes replication changes w.r.t. not-ready-vbuckets
-                                                                                 restarts.")
-                                                        (supervisor '(ns_vbm_sup "default") :name 'ns_vbm_sup-default :since "2.0"
-                                                                    "hosts replication ebucketmigrators for 2.0
-                                                                     \"replicators on destination\"")
-                                                        (supervisor '(dcp_sup "default") :name 'dcp_sup-default :since "3.0"
-                                                                    "hosts and manages dcp replicators"
-                                                                    (gen-server '(dcp_replicator "default" "node") :name 'dcp_replicator-default-node :since "3.0"
-                                                                                "implements frontend for dcp replication proxy"
-                                                                                (gen-server '(dcp_consumer_conn "default" "node") :name 'dcp_consumer_conn-default-node :since "3.0"
-                                                                                            "implements consumer side of dcp replication proxy")
-                                                                                (gen-server '(dcp_producer_conn) :since "3.0"
-                                                                                            "implements producer side of dcp replication proxy")))
-                                                        (gen-server '(dcp_notifier "default") :name 'dcp_notifier-default :since "3.0"
-                                                                    "note: it's part of data path. Allows xdcr-over-xmem"
-                                                                    " to check/wait until vbucket has greater seqno then xdcr consumed"
-                                                                    " Only applies to couchbase buckets")
-                                                        (gen-server '(janitor_agent "default") :name 'janitor_agent-default :since "2.0"
-                                                                    "applies replication and vbucket state changes
-                                                                     decided by janitor and vbuckets mover")
-                                                        (gen-server '(couch_stats_reader "default") :name 'couch_stats_reader-default :since "2.0"
-                                                                    "samples & keeps some couch stats so that
-                                                                    stats_collector can get them quickly")
-                                                        (gen-server '(stats_collector "default")
-                                                                    "on each tick grabs memcached stats parses/massages
-                                                                     them a bit and sends them out to ns_stats_event"
-                                                                    (pubsub-link nil :to 'ns_tick_event))
-                                                        (gen-server '(stats_archiver "default")
-                                                                    "saves stats for this bucket that it sees on
-                                                                     ns_stats_event"
-                                                                    (pubsub-link nil :to 'ns_stats_event))
-                                                        (gen-server '(stats_reader "default")
-                                                                    "used to read stats archive")
-                                                        (event-handler '(failover_safeness_level "default") :to 'ns_stats_event
-                                                                       "estimates bucket's replication up-to-date-ness
-                                                                        'from this node' based on stats it sees")
-                                                        (work_queue '(terse_bucket_info_uploader "default")
-                                                                    "observes invalidations of bucket info cache and uploads"
-                                                                    "fresh test bucket details to ep-engine"
-                                                                    (pubsub-link nil :to 'bucket_info_cache_invalidations))))
-                        (gen-server 'system_stats_collector)
-                        (gen-server '(stats_archiver "@system"))
-                        (gen-server '(stats_reader "@system"))
-                        (gen-server 'compaction_daemon :since "2.0"
-                                    "triggers and monitors bucket's db and views compactions")
-                        (cb_generic_replication_srv 'xdc_rdoc_replication_srv :since "2.0"
-                                                    "replicates _replicator docs across cluster")
-                        (gen-server 'set_view_update_daemon :since "2.0"
-                                    "periodically triggers set view indexes update")
-                        (gen-server 'samples_loader_tasks :since "2.0"
-                                    "babysits sample loading tasks and exposes them via tasks API")))
+%%% hierarchy on ns_couchdb node
+{supervisor,ns_couchdb_sup,
+    {mode,one_for_one},
+    {since,"3.2"},
+    [{supervisor,cb_couch_sup,
+         {mode,one_for_one},
+         {since,"2.0"},
+         [{gen_server,cb_auth_info,
+              "admin auth sharing process for view engine"},
+          {supervisor,couch_app}]},
+     {transient,
+         {'fun',cb_init_loggers,start_link},
+         "sets log level to couchdb"},
+     {gen_server,ns_memcached_sockets_pool,
+         "instance of ns_connection_pool for long blocking memcached calls"},
+     {gen_server,xdcr_dcp_sockets_pool,
+         "pool of sockets that are used by xdcr dcp streaming"},
+     {worker,
+         {'fun',ns_couchdb_stats_collector,start_loop},
+         "facility for collecting stats on ns_couchdb node"},
+     {supervisor,ns_couchdb_config_sup,
+         {mode,rest_for_one},
+         {since,"3.2"},
+         [{gen_event,ns_config_events,
+              "fired when any ns_config variable is changed"},
+          {gen_event,ns_config_events_local,
+              {since,"1.8.1"},
+              "fired when any ns_config variable is changed locally (i.e. not replicated from other node, but genuinely changed on this node"},
+          {gen_server,ns_config,
+              "maintains local ns_config. Fires ns_config_events when any config variable is changed "},
+          {gen_server,ns_couchdb_config_rep,
+              "ns_config replication from ns_server to ns_couchdb node"},
+          {gen_server,cb_config_couch_sync,
+              {since,"2.0"},
+              "syncs important ns_config variables into couch config",
+              [{pubsub_link,nil,{to,ns_config_events}}]}]},
+     {gen_server,request_throttler},
+     {gen_server,vbucket_map_mirror,
+         {since,"2.0"},
+         "maintains ets cache of vbucket map for faster view merger params generation. Alsocaches capi_url(Node)"},
+     {gen_server,set_view_update_daemon,
+         {since,"2.0"},
+         "periodically triggers set view indexes update"},
+     {worker,
+         {'fun',ns_ssl_services_setup,start_link_capi_service},
+         "starts mochiweb_http on capi port"}]}.
