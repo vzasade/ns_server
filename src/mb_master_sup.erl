@@ -23,6 +23,15 @@
 
 -export([init/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     [
+      ns_orchestrator:doc(),
+      ns_tick:doc(),
+      auto_failover:doc()
+     ]}.
 
 start_link() ->
     master_activity_events:note_became_master(),

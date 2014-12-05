@@ -30,6 +30,11 @@
 
 -record(state, {time}).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, {global, ?MODULE}}.
+
 %%
 %% API
 %%

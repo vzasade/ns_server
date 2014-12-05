@@ -50,6 +50,13 @@
          master/2,
          worker/2]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_fsm, ?MODULE,
+     "NOTE: the following is just spawn_link relation",
+     [mb_master_sup:doc()]}.
+
 %%
 %% API
 %%

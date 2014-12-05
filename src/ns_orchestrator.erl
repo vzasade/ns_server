@@ -93,6 +93,18 @@
          recovery/2, recovery/3,
          upgrading_to_dcp/2, upgrading_to_dcp/3]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_fsm, {global, ?MODULE},
+     [
+      {notable_call, {'fun', ns_rebalancer, failover},
+       "failover is done on orchestrator process itself"},
+      {spawns, {'fun', ns_rebalancer, rebalance},
+       "but rebalance is separate process"},
+      {spawns, {'fun', ns_janitor, cleanup},
+       "and janitor is separate as well"}
+     ]}.
 
 %%
 %% API

@@ -77,6 +77,11 @@
           reported_in_recovery=false :: boolean()
          }).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, {global, ?MODULE}}.
+
 %%
 %% API
 %%
