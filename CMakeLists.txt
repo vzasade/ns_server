@@ -96,6 +96,14 @@ ADD_CUSTOM_TARGET (ns_test
   VERBATIM)
 ADD_DEPENDENCIES (ns_test ns_server)
 
+# Hierarchy doc generator invocation
+ADD_CUSTOM_TARGET (ns_hierarchy
+  "${CMAKE_COMMAND}" -D "ERL_EXECUTABLE=${ERL_EXECUTABLE}"
+  -P "${PROJECT_SOURCE_DIR}/cmake_modules/do-hierarchy.cmake"
+  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  VERBATIM)
+ADD_DEPENDENCIES (ns_hierarchy ns_server)
+
 # Docs
 ADD_CUSTOM_TARGET (ns_docs COMMAND priv/erldocs ./docs/erldocs
   WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" VERBATIM)

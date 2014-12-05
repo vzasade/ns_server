@@ -33,7 +33,7 @@ clean clean_all:
 install:
 	cd build && $(MAKE) --no-print-directory $@
 
-dataclean distclean test docs dialyzer dialyzer_obsessive:
+dataclean distclean test docs dialyzer dialyzer_obsessive, hierarchy:
 	cd build && $(MAKE) --no-print-directory ns_$@
 
 # assuming exuberant-ctags
