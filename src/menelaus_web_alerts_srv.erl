@@ -39,6 +39,10 @@
 -export([start_link/0, stop/0, local_alert/2, global_alert/2,
          fetch_alerts/0, consume_alerts/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE}.
 
 %% short description for a specific error; used in email subject
 short_description(ip) ->

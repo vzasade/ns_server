@@ -27,6 +27,14 @@
 
 -include("ns_stats.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "this service is used to wait for sample_archived event on the " ++
+         "particular node and then gather stats on this node and maybe on other nodes",
+     [{pubsub_link, nil, {to, ns_stats_event}}]}.
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

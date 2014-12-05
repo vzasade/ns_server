@@ -33,6 +33,21 @@
 
 -include("ns_common.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, one_for_one},
+     [
+      ns_ssl_services_sup:doc(),
+      menelaus_ui_auth:doc(),
+      menelaus_web_cache:doc(),
+      menelaus_stats_gatherer:doc(),
+      menelaus_web:doc(),
+      menelaus_web_alerts_srv:doc(),
+      menelaus_event:doc(),
+      hot_keys_keeper:doc()
+     ]}.
+
 %% @spec start_link() -> ServerRet
 %% @doc API for starting the supervisor.
 start_link() ->

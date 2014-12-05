@@ -21,6 +21,13 @@
 
 -export([start_link/0, versions_response/0, lookup_or_compute_with_expiration/3]).
 
+-export([doc/0]).
+
+doc() ->
+    {work_queue, ?MODULE,
+     "This service maintains public ETS table that's caching various" ++
+         " somewhat expensive to compute stuff used by menelaus_web"}.
+
 start_link() ->
     work_queue:start_link(menelaus_web_cache, fun cache_init/0).
 

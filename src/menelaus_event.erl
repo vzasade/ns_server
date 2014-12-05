@@ -36,6 +36,11 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("ns_common.hrl").
 
+-export([doc/0]).
+
+doc() ->
+    {event_handler, ?MODULE, {to, ns_config_events}, {to, ns_node_disco_events}}.
+
 % Noop process to get initialized in the supervision tree.
 
 start_link() ->

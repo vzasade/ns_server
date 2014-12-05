@@ -26,6 +26,12 @@
 -export([generate_token/1, maybe_refresh/1,
          check/1, reset/0, logout/1]).
 
+-export([doc/0]).
+
+doc() ->
+    {gen_server, ?MODULE,
+     "ui token authentication server"}.
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 

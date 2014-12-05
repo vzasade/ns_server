@@ -85,6 +85,11 @@
 -define(AUTO_FAILLOVER_MIN_TIMEOUT, 30).
 -define(AUTO_FAILLOVER_MAX_TIMEOUT, 3600).
 
+-export([doc/0]).
+
+doc() ->
+    {worker, ?MODULE}.
+
 %% External API
 
 start_link() ->
