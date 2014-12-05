@@ -21,6 +21,8 @@
          get_babysitter_cookie/0,
          start_disk_sink/2, adjust_loglevel/2]).
 
+-export([doc/1]).
+
 -include("ns_common.hrl").
 -include_lib("ale/include/ale.hrl").
 
@@ -268,3 +270,32 @@ get_babysitter_node() ->
     {ok, Node} = application:get_env(ns_server, babysitter_node),
     erlang:set_cookie(Node, get_babysitter_cookie()),
     Node.
+
+doc(FileName) ->
+    try
+        do_doc(FileName)
+    catch T:E ->
+            io:format("Creating hierarchy doc failed with ~p:~p~nCallstack: ~p~n",
+                      [T,E,erlang:get_stacktrace()]),
+            failure
+    end.
+
+do_doc(FileName) ->
+    io:format("Creating hierarchy doc ~s~n", [FileName]),
+    H1 = ns_server_cluster_sup:doc(),
+    H2 = ns_couchdb_sup:doc(),
+
+    case file:open(FileName, write) of
+        {ok, File} ->
+            try
+                io:fwrite(File, "%%% -*- Mode: erlang -*-~n~n", []),
+                io:fwrite(File, "%%% hierarchy on ns_server node~n~p.~n~n", [H1]),
+                io:fwrite(File, "%%% hierarchy on ns_couchdb node~n~p.", [H2])
+            after
+                file:close(File)
+            end,
+            ok;
+        Error ->
+            io:format("Cannot open file for write. Error: ~p~n", [Error]),
+            failure
+    end.
