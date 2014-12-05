@@ -6,6 +6,15 @@
 
 -export([init/1, start_link/0, restart_ssl_service/0]).
 
+-export([doc/0]).
+
+doc() ->
+    {supervisor, ?MODULE, {mode, rest_for_one},
+     [
+      ns_ssl_services_setup:doc(),
+      ns_ssl_services_setup:doc_rest()
+     ]}.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

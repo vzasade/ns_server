@@ -15,7 +15,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([doc_capi/0]).
+-export([doc/0, doc_capi/0, doc_rest/0]).
 
 %% state sanitization
 -export([format_status/2]).
@@ -31,9 +31,16 @@
                 compat_30,
                 node}).
 
+doc() ->
+    {gen_server, ?MODULE}.
+
 doc_capi() ->
     {worker, {'fun', ?MODULE, start_link_capi_service},
      "starts mochiweb_http on capi port"}.
+
+doc_rest() ->
+    {worker, {'fun', ?MODULE, start_link_rest_service},
+     "starts mochiweb_http on ssl rest port"}.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
