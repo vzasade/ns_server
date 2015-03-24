@@ -86,6 +86,7 @@
          is_valid_positive_integer_in_range/3,
          validate_boolean/2,
          validate_dir/2,
+         validate_writable_dir/2,
          validate_integer/2,
          validate_range/4,
          validate_range/5,
@@ -3696,7 +3697,7 @@ handle_settings_audit(Req) ->
 validate_settings_audit(Args) ->
     R = validate_has_params({Args, [], []}),
     R0 = validate_boolean(auditd_enabled, R),
-    R1 = validate_dir(log_path, R0),
+    R1 = validate_writable_dir(log_path, validate_dir(log_path, R0)),
     R2 = validate_integer(rotate_interval, R1),
     R3 = validate_range(
            rotate_interval, 15*60, 60*60*24*7,

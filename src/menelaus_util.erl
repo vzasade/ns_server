@@ -62,6 +62,7 @@
          is_valid_positive_integer_in_range/3,
          validate_boolean/2,
          validate_dir/2,
+         validate_writable_dir/2,
          validate_integer/2,
          validate_range/4,
          validate_range/5,
@@ -479,6 +480,21 @@ validate_dir(Name, {OutList, _, _} = State) ->
                     return_value(Name, Value, State);
                 false ->
                     return_error(Name, io_lib:format("The value of ~p must be a valid directory",
+                                                     [Name]), State)
+            end
+    end.
+
+validate_writable_dir(Name, {_, InList, _} = State) ->
+    Value = proplists:get_value(Name, InList),
+    case Value of
+        undefined ->
+            State;
+        _ ->
+            case misc:is_dir_writable(Value) of
+                true ->
+                    State;
+                false ->
+                    return_error(Name, io_lib:format("The directory ~p must be writable",
                                                      [Name]), State)
             end
     end.

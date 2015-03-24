@@ -1597,16 +1597,23 @@ memory() ->
             notsup
     end.
 
+is_dir_writable(Path) ->
+    TouchPath = filename:join(Path, ".touch"),
+    case misc:write_file(TouchPath, <<"">>) of
+        ok ->
+            file:delete(TouchPath),
+            true;
+        _ ->
+            false
+    end.
+
 ensure_writable_dir(Path) ->
     filelib:ensure_dir(Path),
     case filelib:is_dir(Path) of
         true ->
-            TouchPath = filename:join(Path, ".touch"),
-            case misc:write_file(TouchPath, <<"">>) of
-                ok ->
-                    file:delete(TouchPath),
-                    ok;
-                _ -> error
+            case is_dir_writable(Path) of
+                true -> ok;
+                false -> error
             end;
         _ ->
             case file:make_dir(Path) of
