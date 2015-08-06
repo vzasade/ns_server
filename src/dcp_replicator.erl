@@ -28,6 +28,7 @@
 -export([start_link/2,
          get_partitions/2,
          setup_replication/3,
+         cleanup_replication/3,
          takeover/3,
          wait_for_data_move/3,
          get_docs_estimate/3,
@@ -94,6 +95,12 @@ handle_call({setup_replication, Partitions}, _From, #state{consumer_conn = Pid} 
                         end),
     {reply, RV, State};
 
+handle_call({cleanup_replication, Partitions}, _From, #state{consumer_conn = Pid} = State) ->
+    RV = spawn_and_wait(fun () ->
+                                dcp_consumer_conn:cleanup_streams(Pid, Partitions)
+                        end),
+    {reply, RV, State};
+
 handle_call({takeover, Partition}, _From, #state{consumer_conn = Pid} = State) ->
     RV = spawn_and_wait(fun () ->
                                 dcp_consumer_conn:maybe_close_stream(Pid, Partition),
@@ -116,6 +123,10 @@ get_partitions(ProducerNode, Bucket) ->
 setup_replication(ProducerNode, Bucket, Partitions) ->
     gen_server:call(server_name(ProducerNode, Bucket),
                     {setup_replication, Partitions}, infinity).
+
+cleanup_replication(ProducerNode, Bucket, Partitions) ->
+    gen_server:call(server_name(ProducerNode, Bucket),
+                    {cleanup_replication, Partitions}, infinity).
 
 takeover(ProducerNode, Bucket, Partition) ->
     gen_server:call(server_name(ProducerNode, Bucket),

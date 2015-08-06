@@ -57,8 +57,14 @@ set_desired_replications(Bucket, DesiredReps) ->
     NeededNodes = [Node || {Node, [_|_]} <- DesiredReps],
     gen_server:call(server_name(Bucket), {manage_replicators, NeededNodes}, infinity),
 
-    [dcp_replicator:setup_replication(Node, Bucket, Partitions)
-     || {Node, [_|_] = Partitions} <- DesiredReps].
+    RV = [dcp_replicator:cleanup_replication(Node, Bucket, Partitions)
+          || {Node, [_|_] = Partitions} <- DesiredReps],
+
+    lists:map(fun ({ok, {Node, [_|_] = Partitions}}) ->
+                      dcp_replicator:setup_replication(Node, Bucket, Partitions);
+                  ({Error, _}) ->
+                      Error
+              end, lists:zip(RV, DesiredReps)).
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

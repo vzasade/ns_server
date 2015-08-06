@@ -21,15 +21,15 @@
 -include("mc_constants.hrl").
 -include("mc_entry.hrl").
 
--export([start_link/2,
+-export([start_link/2, cleanup_streams/2,
          setup_streams/2, takeover/2, maybe_close_stream/2]).
 
 -export([init/2, handle_packet/5, handle_call/4, handle_cast/3]).
 
 -record(stream_state, {owner :: {pid(), any()},
-                       to_add :: [vbucket_id()],
-                       to_close :: [vbucket_id()],
-                       to_close_on_producer :: [vbucket_id()],
+                       to_add :: [{vbucket_id()}],
+                       to_close :: [{vbucket_id()}],
+                       to_close_on_producer :: [{vbucket_id()}],
                        errors :: [{non_neg_integer(), vbucket_id()}]
                       }).
 
@@ -157,42 +157,64 @@ handle_call({maybe_close_stream, Partition}, From,
             #state{state=idle} = State, ParentState) ->
     CurrentPartitions = get_partitions(State),
 
-    StreamsToSet = lists:delete(Partition, CurrentPartitions),
-    handle_call({setup_streams, StreamsToSet}, From, State, ParentState);
+    DesiredStreams = lists:delete(Partition, CurrentPartitions),
+    handle_call({cleanup_streams, DesiredStreams}, From, State, ParentState);
+
+handle_call({cleanup_streams, Partitions}, From,
+            #state{state=idle} = State, ParentState) ->
+    Sock = dcp_proxy:get_socket(ParentState),
+    CurrentPartitions = get_partitions(State),
+
+    case CurrentPartitions -- Partitions of
+        [] ->
+            {reply, ok, State, ParentState};
+        StreamsToStop ->
+            StopStreamRequests =
+                lists:map(fun (Partition) ->
+                                  Producer = dcp_proxy:get_partner(ParentState),
+                                  dcp_commands:close_stream(Sock, Partition, Partition),
+                                  gen_server:cast(Producer, {close_stream, Partition}),
+                                  {Partition}
+                          end, StreamsToStop),
+            ?log_debug("Closing DCP streams:~nCurrent ~w~nStreams to close ~w~n",
+                       [CurrentPartitions, StreamsToStop]),
+
+            {noreply, State#state{state = #stream_state{
+                                             owner = From,
+                                             to_add = [],
+                                             to_close = StopStreamRequests,
+                                             to_close_on_producer = StopStreamRequests,
+                                             errors = []
+                                            }
+                                 }, ParentState}
+    end;
 
 handle_call({setup_streams, Partitions}, From,
             #state{state=idle} = State, ParentState) ->
     Sock = dcp_proxy:get_socket(ParentState),
     CurrentPartitions = get_partitions(State),
 
-    StreamsToStart = Partitions -- CurrentPartitions,
-    StreamsToStop = CurrentPartitions -- Partitions,
+    [] = CurrentPartitions -- Partitions,
 
-    case {StreamsToStart, StreamsToStop} of
-        {[], []} ->
+    case Partitions -- CurrentPartitions of
+        [] ->
             {reply, ok, State, ParentState};
-        _ ->
-            StartStreamRequests = lists:map(fun (Partition) ->
-                                                    dcp_commands:add_stream(Sock, Partition,
-                                                                            Partition, add),
-                                                    {Partition}
-                                            end, StreamsToStart),
+        StreamsToStart ->
+            StartStreamRequests =
+                lists:map(fun (Partition) ->
+                                  dcp_commands:add_stream(Sock, Partition,
+                                                          Partition, add),
+                                  {Partition}
+                          end, StreamsToStart),
 
-            StopStreamRequests = lists:map(fun (Partition) ->
-                                                   Producer = dcp_proxy:get_partner(ParentState),
-                                                   dcp_commands:close_stream(Sock, Partition, Partition),
-                                                   gen_server:cast(Producer, {close_stream, Partition}),
-                                                   {Partition}
-                                           end, StreamsToStop),
-
-            ?log_debug("Setup DCP streams:~nCurrent ~w~nStreams to open ~w~nStreams to close ~w~n",
-                       [CurrentPartitions, StreamsToStart, StreamsToStop]),
+            ?log_debug("Setup DCP streams:~nCurrent ~w~nStreams to open ~w~n",
+                       [CurrentPartitions, StreamsToStart]),
 
             {noreply, State#state{state = #stream_state{
                                              owner = From,
                                              to_add = StartStreamRequests,
-                                             to_close = StopStreamRequests,
-                                             to_close_on_producer = StopStreamRequests,
+                                             to_close = [],
+                                             to_close_on_producer = [],
                                              errors = []
                                             }
                                  }, ParentState}
@@ -305,6 +327,9 @@ maybe_reply_takeover(_From, TakeoverState, State) ->
 
 setup_streams(Pid, Partitions) ->
     gen_server:call(Pid, {setup_streams, Partitions}, infinity).
+
+cleanup_streams(Pid, Partitions) ->
+    gen_server:call(Pid, {cleanup_streams, Partitions}, infinity).
 
 maybe_close_stream(Pid, Partition) ->
     gen_server:call(Pid, {maybe_close_stream, Partition}, infinity).
