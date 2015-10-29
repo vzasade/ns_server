@@ -114,7 +114,8 @@ var ThePage = {
              documents: DocumentsSection,
              log: LogsSection,
              settings: SettingsSection,
-             indexes: IndexesSection},
+             indexes: IndexesSection,
+             fts: FtsSection},
 
   coming: {alerts:true},
 

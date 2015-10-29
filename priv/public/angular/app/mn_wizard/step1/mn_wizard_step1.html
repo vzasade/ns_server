@@ -77,6 +77,13 @@
               {{setupServicesErrors[0]}}
             </div>
             <div mn-memory-quota="startNewClusterConfig" errors="postMemoryErrors">
+            <div>
+              <input type="checkbox" class="inp" name="services" ng-model="services.fts" value="fts" id="wizard_setup_fts_checkbox" />
+              <label class="label" for="wizard_setup_fts_checkbox" style="text-align: left;">Full-Text</label>
+            </div>
+            <div>
+              <input type="checkbox" class="inp" name="services" ng-model="services.moxi" value="moxi" id="wizard_setup_moxi_checkbox" />
+              <label class="label" for="wizard_setup_moxi_checkbox" style="text-align: left;">Moxi</label>
             </div>
           </div>
         </div>
