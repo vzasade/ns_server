@@ -134,7 +134,7 @@ grab_stats(_State) ->
     end.
 
 get_stats() ->
-    case index_rest:get_json(indexer, "stats?async=true") of
+    case index_rest:get_json(index, "stats?async=true") of
         {ok, {[_|_] = Stats}} ->
             Stats;
         {ok, Other} ->
@@ -152,7 +152,7 @@ process_stats(TS, GrabbedStats, PrevCounters, PrevTS, #state{buckets = KnownBuck
     {Stats, SortedCounters} =
         base_stats_collector:calculate_counters(TS, Gauges, Counters, PrevCounters, PrevTS),
 
-    index_status_keeper:update(Status),
+    index_status_keeper:update(index, Status),
 
     AggregatedStats =
         [{"@index-"++binary_to_list(Bucket), Values} ||
