@@ -20,7 +20,8 @@
 -include("ns_common.hrl").
 
 -export([handle_cluster_certificate/1,
-         handle_regenerate_certificate/1]).
+         handle_regenerate_certificate/1,
+         handle_upload_cluster_ca/1]).
 
 handle_cluster_certificate(Req) ->
     menelaus_web:assert_is_enterprise(),
@@ -64,3 +65,32 @@ handle_regenerate_certificate(Req) ->
     ?log_info("Completed certificate regeneration"),
     ns_audit:regenerate_certificate(Req),
     handle_cluster_certificate_simple(Req).
+
+validation_error_message(empty_cert) ->
+    <<"Certificate should not be empty">>;
+validation_error_message(not_valid_at_this_time) ->
+    <<"Certificate is not valid at this time">>;
+validation_error_message(malformed_cert) ->
+    <<"Malformed certificate">>;
+validation_error_message(non_cert_entries) ->
+    <<"Certificate contains malformed entries.">>;
+validation_error_message(too_many_entries) ->
+    <<"Only one certificate per request is allowed.">>.
+
+reply_error(Req, Error) ->
+    menelaus_util:reply_json(Req, {[{error, validation_error_message(Error)}]}, 400).
+
+handle_upload_cluster_ca(Req) ->
+    menelaus_web:assert_is_enterprise(),
+
+    case Req:recv_body() of
+        undefined ->
+            reply_error(Req, empty_cert);
+        PemEncodedCA ->
+            case ns_server_cert:set_cluster_ca(PemEncodedCA) of
+                ok ->
+                    handle_cluster_certificate_extended(Req);
+                {error, Error} ->
+                    reply_error(Req, Error)
+            end
+    end.
