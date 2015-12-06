@@ -64,6 +64,7 @@
          validate_any_value/3,
          validate_by_fun/3,
          validate_required/2,
+         read_file/2,
          execute_if_validated/3,
          get_values/1,
          return_value/3,
@@ -469,7 +470,12 @@ validate_any_value(Name, {OutList, _, _} = State, Convert) ->
         false ->
             State;
         {_, Value} ->
-            return_value(Name, Convert(Value), State)
+            case Convert(Value) of
+                {error, Error} ->
+                    return_error(Name, Error, State);
+                {ok, Converted} ->
+                    return_value(Name, Converted, State)
+            end
     end.
 
 validate_required(Name, {OutList, _, _} = State) ->
@@ -479,6 +485,31 @@ validate_required(Name, {OutList, _, _} = State) ->
         _ ->
             State
     end.
+
+reason_to_error(enoent) ->
+    "The file does not exist.";
+reason_to_error(eacces) ->
+    "Missing permission for reading the file.";
+reason_to_error(eisdir) ->
+    "The named file is a directory.";
+reason_to_error(enotdir) ->
+    "A component of the file name is not a directory.";
+reason_to_error(enomem) ->
+    "There is not enough memory for the contents of the file.";
+reason_to_error(Other) ->
+    "Error reading file: " ++ atom_to_list(Other).
+
+read_file(Name, State) ->
+    validate_any_value(
+      Name, State,
+      fun (Path) ->
+              case file:read_file(Path) of
+                  {ok, Binary} ->
+                      {ok, Binary};
+                  {error, Reason} ->
+                      {error, reason_to_error(Reason)}
+              end
+      end).
 
 execute_if_validated(Fun, Req, {_, Values, Errors}) ->
     ValidateOnly = proplists:get_value("just_validate", Req:parse_qs()) =:= "1",

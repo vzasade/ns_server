@@ -48,7 +48,7 @@ validate_settings_post(Args) ->
     validate_unsupported_params(R2).
 
 validate_loglevel(State) ->
-    State1 = validate_any_value(logLevel, State, fun list_to_binary/1),
+    State1 = validate_any_value(logLevel, State, fun (List) -> {ok, list_to_binary(List)} end),
     validate_by_fun(
       fun (Value) ->
               LogLevels = ["silent", "fatal", "error", "warn", "info",
