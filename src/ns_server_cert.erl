@@ -24,7 +24,8 @@
          validate_cert/1,
          generate_and_set_cert_and_pkey/0,
          cluster_ca/0,
-         set_cluster_ca/1]).
+         set_cluster_ca/1,
+         set_node_certificate_chain/2]).
 
 cluster_ca() ->
     case ns_config:search(cert_and_pkey) of
@@ -246,4 +247,81 @@ set_cluster_ca(CA) ->
         {error, Error, _} = Err ->
             ?log_error("Certificate authority validation failed with ~p", [Err]),
             {error, Error}
+    end.
+
+verify_fun(Cert, Event, State) ->
+    TBSCert = Cert#'OTPCertificate'.tbsCertificate,
+    Subject = format_name(TBSCert#'OTPTBSCertificate'.subject),
+    ?log_debug("Certificate verification event : ~p", [{Subject, Event}]),
+
+    Resp = case Event of
+               {bad_cert, Error} ->
+                   {fail, {Error, Subject}};
+               {extension, _} ->
+                   {unknown, State};
+               valid ->
+                   {valid, State};
+               valid_peer ->
+                   {valid, State}
+           end,
+    case Resp of
+        {valid, _} ->
+            Resp;
+        _ ->
+            ?log_error("Certificate validation failed with reason ~p~n", [Resp]),
+            Resp
+    end.
+
+validate_chain({'Certificate', RootCertDer, not_encrypted}, Chain) ->
+    DerChain = [Der || {'Certificate', Der, not_encrypted} <- Chain],
+    public_key:pkix_path_validation(RootCertDer, DerChain, [{verify_fun, {fun verify_fun/3, []}}]).
+
+get_chain_info(Chain) ->
+    lists:foldl(fun ({'Certificate', DerCert, not_encrypted}, Acc) ->
+                        Decoded = public_key:pkix_decode_cert(DerCert, otp),
+                        TBSCert = Decoded#'OTPCertificate'.tbsCertificate,
+                        Validity = TBSCert#'OTPTBSCertificate'.validity,
+                        NotAfter = convert_date(Validity#'Validity'.notAfter),
+                        case Acc of
+                            undefined ->
+                                {format_name(TBSCert#'OTPTBSCertificate'.subject), NotAfter};
+                            {Sub, Expiration} when Expiration > NotAfter  ->
+                                {Sub, NotAfter};
+                            Pair ->
+                                Pair
+                        end
+                end, undefined, lists:reverse(Chain)).
+
+set_node_certificate_chain(Chain, PKey) ->
+    case ns_config:search(cert_and_pkey) of
+        {value, {ClusterCAProps, _, _}} ->
+            ClusterCA = proplists:get_value(pem, ClusterCAProps),
+            [CAPemEntry] = public_key:pem_decode(ClusterCA),
+            PemEntriesReversed = lists:reverse(public_key:pem_decode(Chain)),
+
+            case validate_chain(CAPemEntry, PemEntriesReversed) of
+                {ok, _} ->
+                    {Subject, Expiration} =
+                        get_chain_info(PemEntriesReversed),
+
+                    %% both chains Cert -> I1 -> I2 and Cert -> I1 -> I2 -> Root
+                    %% are valid and will pass the validation
+                    [NodeCert | CAChain] =
+                        lists:reverse(
+                          case PemEntriesReversed of
+                              [CAPemEntry | _] ->
+                                  PemEntriesReversed;
+                              _ ->
+                                  [CAPemEntry | PemEntriesReversed]
+                          end),
+                    ns_ssl_services_setup:set_node_certificate_chain(
+                      [{subject, Subject},
+                       {expires, Expiration},
+                       {verified_with, erlang:md5(ClusterCA)}],
+                      public_key:pem_encode(CAChain), public_key:pem_encode([NodeCert]), PKey);
+                {error, _} = Error ->
+                    Error
+            end;
+        _ ->
+            {error, no_cluster_ca}
     end.
