@@ -504,6 +504,8 @@ loop_inner(Req, {AppRoot, Plugins}, Path, PathTokens) ->
                              {auth, fun menelaus_web_cert:handle_regenerate_certificate/1};
                          ["controller", "uploadClusterCA"] ->
                              {auth, fun menelaus_web_cert:handle_upload_cluster_ca/1};
+                         ["controller", "setNodeCertificate"] ->
+                             {auth, fun menelaus_web_cert:handle_set_node_certificate/1};
                          ["controller", "startLogsCollection"] ->
                              {auth, fun menelaus_web_cluster_logs:handle_start_collect_logs/1};
                          ["controller", "cancelLogsCollection"] ->

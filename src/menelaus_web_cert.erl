@@ -21,7 +21,15 @@
 
 -export([handle_cluster_certificate/1,
          handle_regenerate_certificate/1,
-         handle_upload_cluster_ca/1]).
+         handle_upload_cluster_ca/1,
+         handle_set_node_certificate/1]).
+
+-import(menelaus_util,
+        [read_file/2,
+         validate_required/2,
+         validate_unsupported_params/1,
+         execute_if_validated/3,
+         reply/2]).
 
 handle_cluster_certificate(Req) ->
     menelaus_web:assert_is_enterprise(),
@@ -95,3 +103,37 @@ handle_upload_cluster_ca(Req) ->
                     reply_error(Req, Error)
             end
     end.
+
+
+validate_set_node_certificate(Args) ->
+    R1 = validate_required(chain, {Args, [], []}),
+    R2 = read_file(chain, R1),
+    R3 = validate_required(pkey, R2),
+    R4 = read_file(pkey, R3),
+    validate_unsupported_params(R4).
+
+set_node_certificate_error(no_cluster_ca) ->
+    {<<"_">>, <<"Cluster CA needs to be set before setting node certificate.">>};
+set_node_certificate_error({bad_cert, {Error, Subject}}) ->
+    ErrorMessage = io_lib:format("Certificate validation error: ~p. Certificate: ~p",
+                                 [Error, Subject]),
+    {chain, iolist_to_binary(ErrorMessage)}.
+
+handle_set_node_certificate(Req) ->
+    menelaus_web:assert_is_enterprise(),
+    menelaus_web:assert_is_watson(),
+
+    Args = Req:parse_post(),
+    execute_if_validated(
+      fun (Values) ->
+              Chain = proplists:get_value(chain, Values),
+              PKey = proplists:get_value(pkey, Values),
+
+              case ns_server_cert:set_node_certificate_chain(Chain, PKey) of
+                  ok ->
+                      reply(Req, 200);
+                  {error, Error} ->
+                      menelaus_util:reply_json(
+                        Req, {[{errors, {[set_node_certificate_error(Error)]}}]}, 400)
+              end
+      end, Req, validate_set_node_certificate(Args)).
