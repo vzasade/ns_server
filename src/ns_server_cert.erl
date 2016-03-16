@@ -59,6 +59,14 @@ cluster_ca() ->
             end
     end.
 
+disallowed_algorithms() ->
+    case ns_config:read_key_fast({cert, use_sha1}, false) of
+        true ->
+            [md5, sha];
+        false ->
+            [md5]
+    end.
+
 generate_and_set_cert_and_pkey() ->
     Pair = generate_cert_and_pkey(),
     ns_config:set(cert_and_pkey, Pair).
@@ -182,9 +190,7 @@ convert_date({generalTime, [Y1, Y2, Y3, Y4 | Rest]}) ->
     Year = list_to_integer([Y1, Y2, Y3, Y4]),
     convert_date(Year, Rest).
 
-get_info(DerCert) ->
-    Decoded = public_key:pkix_decode_cert(DerCert, otp),
-    TBSCert = Decoded#'OTPCertificate'.tbsCertificate,
+get_info(#'OTPCertificate'{tbsCertificate = TBSCert}) ->
     Subject = format_name(TBSCert#'OTPTBSCertificate'.subject),
 
     Validity = TBSCert#'OTPTBSCertificate'.validity,
@@ -192,21 +198,45 @@ get_info(DerCert) ->
     NotAfter = convert_date(Validity#'Validity'.notAfter),
     {Subject, NotBefore, NotAfter}.
 
+verify_strong_encryption(#'OTPCertificate'{signatureAlgorithm = SignatureAlgorithm,
+                                           signature = {_, Signature}}) ->
+    DisallowedAlgorithms = disallowed_algorithms(),
+    SignatureAlgorithmId = SignatureAlgorithm#'SignatureAlgorithm'.algorithm,
+    {Alg, _} = public_key:pkix_sign_types(SignatureAlgorithmId),
+    case lists:member(Alg, DisallowedAlgorithms) of
+        true ->
+            {error, disallowed_signature_algorithm, Alg};
+        false ->
+            MinKeySize = ns_config:read_key_fast({cert, minimum_key_size}, 2048) div 8,
+            case size(Signature) < MinKeySize of
+                true ->
+                    {error, short_signature, MinKeySize};
+                false ->
+                    ok
+            end
+    end.
+
 parse_cluster_ca(CA) ->
     case validate_cert(CA) of
         {ok, []} ->
             {error, malformed_cert, CA};
         {ok, [{'Certificate', RootCertDer, not_encrypted}]} ->
-            Info = {Subject, NotBefore, NotAfter} =
+            Info =
                 try
-                    get_info(RootCertDer)
+                    Decoded = public_key:pkix_decode_cert(RootCertDer, otp),
+                    case verify_strong_encryption(Decoded) of
+                        ok ->
+                            get_info(Decoded);
+                        Error ->
+                            Error
+                    end
                 catch T:E ->
                         {error, malformed_cert, {T,E,erlang:get_stacktrace()}}
                 end,
             case Info of
                 {error, malformed_cert, _} = E1 ->
                     E1;
-                _ ->
+                {Subject, NotBefore, NotAfter} ->
                     UTC = calendar:datetime_to_gregorian_seconds(
                             calendar:universal_time()),
                     case NotBefore > UTC orelse NotAfter < UTC of
