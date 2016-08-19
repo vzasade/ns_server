@@ -39,26 +39,7 @@ start(_, _) ->
 
     ok = dist_manager:configure_net_kernel(),
 
-    Cookie =
-        case erlang:get_cookie() of
-            nocookie ->
-                {A1, A2, A3} = erlang:now(),
-                random:seed(A1, A2, A3),
-                NewCookie = list_to_atom(misc:rand_str(16)),
-                erlang:set_cookie(node(), NewCookie),
-                NewCookie;
-            SomeCookie ->
-                SomeCookie
-        end,
-
-    ?log_info("babysitter cookie: ~p~n", [Cookie]),
-    case application:get_env(cookiefile) of
-        {ok, CookieFile} ->
-            misc:atomic_write_file(CookieFile, erlang:atom_to_list(Cookie) ++ "\n"),
-            ?log_info("Saved babysitter cookie to ~s", [CookieFile]);
-        _ ->
-            ok
-    end,
+    encryption_service:set_initial_cookie(),
 
     ns_babysitter_sup:start_link().
 
