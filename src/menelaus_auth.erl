@@ -241,19 +241,24 @@ authenticate({token, Token} = Param) ->
             rpc:call(ns_node_disco:ns_server_node(), ?MODULE, authenticate, [Param])
     end;
 authenticate({Username, Password}) ->
-    case ns_config_auth:authenticate(admin, Username, Password) of
+    case menelaus_cbauth:authenticate_local_user(Username, Password) of
         true ->
-            {ok, {Username, admin}};
+            {ok, {Username, local_cbauth}};
         false ->
-            case ns_config_auth:authenticate(ro_admin, Username, Password) of
+            case ns_config_auth:authenticate(admin, Username, Password) of
                 true ->
-                    {ok, {Username, ro_admin}};
+                    {ok, {Username, admin}};
                 false ->
-                    case ns_config_auth:is_bucket_auth(Username, Password) of
+                    case ns_config_auth:authenticate(ro_admin, Username, Password) of
                         true ->
-                            {ok, {Username, bucket}};
+                            {ok, {Username, ro_admin}};
                         false ->
-                            saslauthd_authenticate(Username, Password)
+                            case ns_config_auth:is_bucket_auth(Username, Password) of
+                                true ->
+                                    {ok, {Username, bucket}};
+                                false ->
+                                    saslauthd_authenticate(Username, Password)
+                            end
                     end
             end
     end.

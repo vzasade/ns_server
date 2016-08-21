@@ -16,7 +16,7 @@
 
 -module(menelaus_cbauth).
 
--export([handle_cbauth_post/1]).
+-export([handle_cbauth_post/1, add_local_auth_headers/1, authenticate_local_user/2]).
 -behaviour(gen_server).
 
 -export([start_link/0]).
@@ -25,7 +25,10 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--record(state, {cbauth_info = undefined, rpc_processes = []}).
+-record(state, {cbauth_info = undefined,
+                rpc_processes = [],
+                local_cred_info,
+                local_password}).
 
 -include("ns_common.hrl").
 
@@ -33,11 +36,35 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init([]) ->
+    LocalPassword = binary_to_list(couch_uuids:random()),
+    {Salt, Mac} = ns_config_auth:hash_password(LocalPassword),
+    LocalCredInfo = build_cred_info(local, get_local_user(), Salt, Mac),
+
     ns_pubsub:subscribe_link(json_rpc_events, fun json_rpc_event/1),
     ns_pubsub:subscribe_link(ns_node_disco_events, fun node_disco_event/1),
     ns_pubsub:subscribe_link(ns_config_events, fun ns_config_event/1),
     json_rpc_connection_sup:reannounce(),
-    {ok, #state{}}.
+    {ok, #state{local_cred_info = LocalCredInfo,
+                local_password = LocalPassword}}.
+
+get_local_user() ->
+     "@local_cbauth".
+
+authenticate_local_user("@local_cbauth", Password) ->
+    gen_server:call(?MODULE, {authenticate_local_user, Password});
+authenticate_local_user(_, _) ->
+    false.
+
+add_local_auth_headers(Headers) ->
+    {User, Password} =
+        case cluster_compat_mode:is_cluster_46() of
+            true ->
+                gen_server:call(?MODULE, get_local_creds);
+            false ->
+                {ns_config_auth:get_user(special),
+                 ns_config_auth:get_password(special)}
+        end,
+    menelaus_rest:add_basic_auth(Headers, User, Password).
 
 json_rpc_event({_, Label, _} = Event) ->
     case is_cbauth_connection(Label) of
@@ -79,15 +106,22 @@ is_interesting({roles_definitions, _}) -> true;
 is_interesting({user_roles, _}) -> true;
 is_interesting(_) -> false.
 
+handle_call({authenticate_local_user, Password}, _From, State = #state{local_password = Password}) ->
+    {reply, true, State};
+handle_call({authenticate_local_user, _Password}, _From, State) ->
+    {reply, false, State};
+handle_call(get_local_creds, _From, State = #state{local_password = Password}) ->
+    {reply, {get_local_user(), Password}, State};
 handle_call(_Msg, _From, State) ->
     {reply, not_implemented, State}.
 
 handle_cast({Msg, Label, Pid}, #state{rpc_processes = Processes,
-                                      cbauth_info = CBAuthInfo} = State) ->
+                                      cbauth_info = CBAuthInfo,
+                                      local_cred_info = LocalCredInfo} = State) ->
     ?log_debug("Observed json rpc process ~p ~p", [{Label, Pid}, Msg]),
     Info = case CBAuthInfo of
                undefined ->
-                   build_auth_info();
+                   build_auth_info(LocalCredInfo);
                _ ->
                    CBAuthInfo
            end,
@@ -119,8 +153,9 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 maybe_notify_cbauth(#state{rpc_processes = Processes,
-                           cbauth_info = CBAuthInfo} = State) ->
-    case build_auth_info() of
+                           cbauth_info = CBAuthInfo,
+                           local_cred_info = LocalCredInfo} = State) ->
+    case build_auth_info(LocalCredInfo) of
         CBAuthInfo ->
             State;
         Info ->
@@ -193,14 +228,17 @@ build_buckets_info(Config) ->
 build_cred_info(Config, Name, Role) ->
     case ns_config_auth:get_creds(Config, Role) of
         {User, Salt, Mac} ->
-            [{Name, {[{user, erlang:list_to_binary(User)},
-                      {salt, base64:encode(Salt)},
-                      {mac, base64:encode(Mac)}]}}];
+            build_cred_info(Name, User, Salt, Mac);
         undefined ->
             []
     end.
 
-build_auth_info() ->
+build_cred_info(Name, User, Salt, Mac) ->
+    [{Name, {[{user, erlang:list_to_binary(User)},
+              {salt, base64:encode(Salt)},
+              {mac, base64:encode(Mac)}]}}].
+
+build_auth_info(LocalCredInfo) ->
     Config = ns_config:get(),
     Nodes = lists:foldl(fun (Node, Acc) ->
                                 case build_node_info(Node, Config) of
@@ -220,7 +258,8 @@ build_auth_info() ->
      {permissionCheckURL, iolist_to_binary(PermissionCheckURL)},
      {ldapEnabled, cluster_compat_mode:is_ldap_enabled()},
      {permissionsVersion, menelaus_web_rbac:check_permissions_url_version(Config)}
-     | (build_cred_info(Config, admin, admin) ++ build_cred_info(Config, roAdmin, ro_admin))].
+     | (build_cred_info(Config, admin, admin) ++
+            build_cred_info(Config, roAdmin, ro_admin) ++ LocalCredInfo)].
 
 handle_cbauth_post(Req) ->
     {User, Source} = menelaus_auth:get_identity(Req),

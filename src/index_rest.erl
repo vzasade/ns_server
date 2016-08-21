@@ -22,10 +22,7 @@
 get_json(Type, Path, Port, Timeout) ->
     URL = lists:flatten(io_lib:format("http://127.0.0.1:~B/~s", [Port, Path])),
 
-    User = ns_config_auth:get_user(special),
-    Pwd = ns_config_auth:get_password(special),
-
-    Headers = menelaus_rest:add_basic_auth([], User, Pwd),
+    Headers = menelaus_cbauth:add_local_auth_headers([]),
 
     RV = rest_utils:request(Type, URL, "GET", Headers, [], Timeout),
     case RV of

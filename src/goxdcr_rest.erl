@@ -71,11 +71,6 @@ is_safe_response_header({"Transfer-Encoding", _}) ->
 is_safe_response_header(_) ->
     true.
 
-special_auth_headers() ->
-    menelaus_rest:add_basic_auth([{"Accept", "application/json"}],
-                                 ns_config_auth:get_user(special),
-                                 ns_config_auth:get_password(special)).
-
 proxy(undefined, MochiReq) ->
     proxy(MochiReq:get(raw_path), MochiReq);
 proxy(Path, MochiReq) ->
@@ -138,7 +133,9 @@ convert_doc_key(Key) ->
 
 query_goxdcr(Fun, Method, Path, Timeout) ->
     RV = {Code, _Headers, Body} =
-        send_with_timeout(Method, Path, special_auth_headers(), [], Timeout),
+        send_with_timeout(Method, Path,
+                          menelaus_cbauth:add_local_auth_headers([{"Accept", "application/json"}]),
+                          [], Timeout),
     case Code of
         200 ->
             case Body of

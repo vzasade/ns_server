@@ -82,7 +82,8 @@ upgrade_config_from_4_1_to_4_5(Config) ->
 
 upgrade_config_from_4_5_to_4_6(Config) ->
     ?log_info("Performing online config upgrade to 4.6 version"),
-    encryption_service_manager:upgrade_config_to_46(Config).
+    encryption_service_manager:upgrade_config_to_46(Config) ++
+        [{set, roles_definitions, menelaus_roles:preconfigured_roles()}].
 
 add_index_ram_alert_limit(Config) ->
     {value, Current} = ns_config:search(Config, alert_limits),

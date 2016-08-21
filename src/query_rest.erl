@@ -58,9 +58,7 @@ do_get_stats() ->
 send(Method, Path, Timeout) ->
     Port =  get_query_port(ns_config:latest(), node()),
     URL = "http://127.0.0.1:" ++ integer_to_list(Port) ++ Path,
-    User = ns_config_auth:get_user(special),
-    Pwd = ns_config_auth:get_password(special),
-    Headers = menelaus_rest:add_basic_auth([], User, Pwd),
+    Headers = menelaus_cbauth:add_local_auth_headers([]),
     {ok, {{Code, _}, RespHeaders, RespBody}} =
         rest_utils:request(query, URL, Method, Headers, [], Timeout),
     {Code, RespHeaders, RespBody}.

@@ -73,6 +73,12 @@ preconfigured_roles() ->
        {[admin, security], [read]},
        {[admin], none},
        {[], [read]}]},
+     {local_cbauth, [],
+      [],
+      [{[admin, internal, xdcr], [read]},
+       {[xdcr, remote_clusters], [read]},
+       {[settings], [write]}, %% for refreshing cert in cbq engine
+       {[pools], [read]}]},
      {cluster_admin, [],
       [{name, <<"Cluster Admin">>},
        {desc, <<"Can manage all cluster features EXCEPT security.">>}],
@@ -238,6 +244,8 @@ get_roles({_, admin}) ->
     [admin];
 get_roles({_, ro_admin}) ->
     [ro_admin];
+get_roles({_, local_cbauth}) ->
+    [local_cbauth];
 get_roles({BucketName, bucket}) ->
     [{bucket_sasl, [BucketName]}];
 get_roles({_, saslauthd} = Identity) ->
@@ -260,6 +268,8 @@ get_all_assignable_roles(Config) ->
 
     lists:foldr(
       fun ({bucket_sasl, _, _, _}, Acc) ->
+              Acc;
+          ({local_cbauth, _, _, _}, Acc) ->
               Acc;
           ({Role, [], Props, _}, Acc) ->
               [{Role, Props} | Acc];
