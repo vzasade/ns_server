@@ -55,7 +55,8 @@ do_upgrade_config(Config, FinalVersion) ->
             [{set, cluster_compat_version, ?VERSION_45} |
              upgrade_config_from_4_1_to_4_5(Config)];
         {value, ?VERSION_45} ->
-            [{set, cluster_compat_version, ?VERSION_46}]
+            [{set, cluster_compat_version, ?VERSION_46} |
+             upgrade_config_from_4_5_to_4_6(Config)]
     end.
 
 upgrade_config_from_2_5_to_3_0(Config) ->
@@ -78,6 +79,10 @@ upgrade_config_from_4_1_to_4_5(Config) ->
         menelaus_roles:upgrade_users(Config),
     RV1 = index_settings_manager:config_upgrade_to_45(Config) ++ RV,
     add_index_ram_alert_limit(Config) ++ RV1.
+
+upgrade_config_from_4_5_to_4_6(Config) ->
+    ?log_info("Performing online config upgrade to 4.6 version"),
+    encryption_service_manager:upgrade_config_to_46(Config).
 
 add_index_ram_alert_limit(Config) ->
     {value, Current} = ns_config:search(Config, alert_limits),

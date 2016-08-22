@@ -28,18 +28,28 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([upgrade_config_to_46/1]).
+
 init([]) ->
     Self = self(),
     ns_pubsub:subscribe_link(ns_config_events, fun config_change_detector/2, Self),
-    case ns_config:search(encrypted_data_key) of
+    case cluster_compat_mode:is_cluster_46() of
+        true ->
+            Self ! notify_service;
         false ->
-            ?log_debug("Retrieve created encrypted data key"),
-            {ok, DataKey} = encryption_service:get_encrypted_data_key(),
-            ns_config:set(encrypted_data_key, DataKey);
-        {value, _} ->
-            Self ! notify_service
+            ok
     end,
     {ok, []}.
+
+upgrade_config_to_46(Config) ->
+    case ns_config:search(Config, encrypted_data_key) of
+        {value, _} ->
+            [];
+        false ->
+            ?log_debug("Store created encrypted data key in config"),
+            {ok, DataKey} = encryption_service:get_encrypted_data_key(),
+            [{set, encrypted_data_key, DataKey}]
+    end.
 
 config_change_detector({encrypted_data_key, _}, Parent) ->
     Parent ! notify_service,
