@@ -16,7 +16,8 @@
 
 -module(menelaus_cbauth).
 
--export([handle_cbauth_post/1, add_local_auth_headers/1, authenticate_local_user/2]).
+-export([handle_cbauth_post/1, add_local_auth_headers/1, authenticate_local_user/2,
+         handle_encrypt/1, handle_decrypt/1]).
 -behaviour(gen_server).
 
 -export([start_link/0]).
@@ -268,3 +269,33 @@ handle_cbauth_post(Req) ->
 
 is_cbauth_connection(Label) ->
     lists:suffix("-cbauth", Label).
+
+ensure_local(Req) ->
+    case Req:get(peer) of
+        "127.0.0.1" ->
+            ok;
+        _ ->
+            erlang:throw({web_exception, 400, <<"API is accessible from localhost only">>, []})
+    end.
+
+handle_encrypt(Req) ->
+    ensure_local(Req),
+    case Req:recv_body() of
+        undefined ->
+            menelaus_util:reply_json(Req, [<<"Data is not supplied">>], 400);
+        Data ->
+            DecodedData = base64:decode(Data),
+            {ok, EncryptedData} = encryption_service:encrypt(DecodedData),
+            menelaus_util:reply_ok(Req, "application/octet-stream", base64:encode(EncryptedData))
+    end.
+
+handle_decrypt(Req) ->
+    ensure_local(Req),
+    case Req:recv_body() of
+        undefined ->
+            menelaus_util:reply_json(Req, [<<"Data is not supplied">>], 400);
+        Data ->
+            DecodedData = base64:decode(Data),
+            {ok, EncryptedData} = encryption_service:decrypt(DecodedData),
+            menelaus_util:reply_ok(Req, "application/octet-stream", base64:encode(EncryptedData))
+    end.
