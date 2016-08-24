@@ -17,7 +17,8 @@
 
 -behavior(application).
 
--export([start/2, stop/1, get_loglevel/1, setup_node_names/0, get_babysitter_node/0,
+-export([start/2, stop/1, get_loglevel/1, setup_node_names/0, setup_babysitter_node/0,
+         get_babysitter_node/0,
          get_babysitter_cookie/0,
          start_disk_sink/2, adjust_loglevel/2]).
 
@@ -265,14 +266,24 @@ stop(_State) ->
 
 setup_node_names() ->
     Name =  misc:node_name_short(),
-    Babysitter = list_to_atom("babysitter_of_" ++ Name ++ "@127.0.0.1"),
     Couchdb = list_to_atom("couchdb_" ++ Name ++ "@127.0.0.1"),
     application:set_env(ns_server, ns_couchdb_node, Couchdb),
+    setup_babysitter_node().
+
+setup_babysitter_node() ->
+    Name = misc:node_name_short(ns_node_disco:ns_server_node()),
+    Babysitter = list_to_atom("babysitter_of_" ++ Name ++ "@127.0.0.1"),
     application:set_env(ns_server, babysitter_node, Babysitter).
 
 get_babysitter_cookie() ->
-    case os:getenv("NS_SERVER_BABYSITTER_COOKIE") of
-        X when is_list(X) -> list_to_atom(X)
+    ThisNode = node(),
+    case ns_node_disco:couchdb_node() of
+        ThisNode ->
+            erlang:get_cookie();
+        _ ->
+            case os:getenv("NS_SERVER_BABYSITTER_COOKIE") of
+                X when is_list(X) -> list_to_atom(X)
+            end
     end.
 
 get_babysitter_node() ->

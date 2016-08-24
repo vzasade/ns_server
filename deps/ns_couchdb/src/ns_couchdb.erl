@@ -70,7 +70,8 @@ setup_env() ->
       fun ({Key, Value}) ->
               application:set_env(ns_couchdb, Key, Value),
               application:set_env(ns_server, Key, Value)
-      end, EnvArgs).
+      end, EnvArgs),
+    ns_server:setup_babysitter_node().
 
 init_logging() ->
     StdLoggers = [?ALE_LOGGER, ?ERROR_LOGGER],
