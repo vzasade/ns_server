@@ -452,9 +452,10 @@ get_connect_info(undefined, HostPort, Bucket, Opts) ->
                            end,
     {HostPort, Username, Password, undefined};
 get_connect_info(Node, HostPort, Bucket, _Opts) ->
+    Config = ns_config:get(),
     {HostPort,
-     ns_config:search_node_prop(Node, ns_config:latest(), memcached, admin_user),
-     ns_config:search_node_prop(Node, ns_config:latest(), memcached, admin_pass),
+     ns_memcached:get_user(Config, Node),
+     ns_memcached:get_password(Config, Node),
      Bucket}.
 
 init({Src, Dst, Opts}=InitArgs) ->

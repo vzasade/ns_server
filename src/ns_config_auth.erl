@@ -102,7 +102,7 @@ get_user_old(ro_admin) ->
     end.
 
 get_password(special) ->
-    ns_config:search_node_prop(ns_config:latest(), memcached, admin_pass).
+    ns_memcached:get_password(ns_config:latest()).
 
 get_creds(Config, Role) ->
     case ns_config:search(Config, get_key(Role)) of
@@ -138,7 +138,7 @@ credentials_changed_old(admin, User, Password) ->
     end.
 
 authenticate(admin, [$@ | _] = User, Password) ->
-    Password =:= ns_config:search_node_prop(ns_config:latest(), memcached, admin_pass)
+    Password =:= get_password(special)
         orelse authenticate_non_special(admin, User, Password);
 authenticate(Role, User, Password) ->
     authenticate_non_special(Role, User, Password).

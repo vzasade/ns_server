@@ -23,7 +23,8 @@
 -export([get_query_port/2,
          get_ssl_query_port/2,
          get_stats/0,
-         maybe_refresh_cert/0]).
+         maybe_refresh_cert/0,
+         refresh_cert/0]).
 
 get_query_port(Config, Node) ->
     ns_config:search(Config, {node, Node, query_port}, undefined).

@@ -28,7 +28,10 @@
          get_encrypted_data_key/0,
          set_encrypted_data_key/1,
          decrypt/1,
-         encrypt/1]).
+         encrypt/1,
+         encrypt_config_string/1,
+         maybe_decrypt_config_string/1
+        ]).
 
 -record(state, {
           gosecrets :: pid(),
@@ -55,8 +58,22 @@ set_encrypted_data_key(DataKey) ->
 encrypt(Data) ->
     gen_server:call({?MODULE, ns_server:get_babysitter_node()}, {encrypt, Data}, infinity).
 
+encrypt_config_string(Val) when is_list(Val) ->
+    {ok, Encrypted} = encrypt(list_to_binary(Val)),
+    {encrypted, Encrypted}.
+
 decrypt(Data) ->
     gen_server:call({?MODULE, ns_server:get_babysitter_node()}, {decrypt, Data}, infinity).
+
+maybe_decrypt_config_string({encrypted, Binary}) when is_binary(Binary) ->
+    case decrypt(Binary) of
+        {ok, Decrypted} ->
+            {ok, binary_to_list(Decrypted)};
+        Error ->
+            Error
+    end;
+maybe_decrypt_config_string(String) when is_list(String) ->
+    {ok, String}.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

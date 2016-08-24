@@ -42,14 +42,26 @@ init([]) ->
     {ok, []}.
 
 upgrade_config_to_46(Config) ->
-    case ns_config:search(Config, encrypted_data_key) of
-        {value, _} ->
-            [];
-        false ->
-            ?log_debug("Store created encrypted data key in config"),
-            {ok, DataKey} = encryption_service:get_encrypted_data_key(),
-            [{set, encrypted_data_key, DataKey}]
-    end.
+    encrypt_memcached_passwords(Config) ++
+        case ns_config:search(Config, encrypted_data_key) of
+            {value, _} ->
+                [];
+            false ->
+                ?log_debug("Store created encrypted data key in config"),
+                {ok, DataKey} = encryption_service:get_encrypted_data_key(),
+                [{set, encrypted_data_key, DataKey}]
+        end.
+
+encrypt_memcached_passwords(Config) ->
+    ns_config:fold(
+          fun ({node, _Node, memcached} = K, Props, Acc) ->
+                  Password = proplists:get_value(admin_pass, Props),
+                  EncryptedPassword = encryption_service:encrypt_config_string(Password),
+                  NewProps = lists:keyreplace(admin_pass, 1, Props, {admin_pass, EncryptedPassword}),
+                  [{set, K, NewProps} | Acc];
+              (_, _, Acc) ->
+                  Acc
+          end, [], Config).
 
 config_change_detector({encrypted_data_key, _}, Parent) ->
     Parent ! notify_service,

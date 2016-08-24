@@ -137,7 +137,11 @@
          wait_for_seqno_persistence/3,
          get_keys/3,
          config_validate/1,
-         config_reload/0
+         config_reload/0,
+         get_user/1,
+         get_user/2,
+         get_password/1,
+         get_password/2
         ]).
 
 %% for ns_memcached_sockets_pool only
@@ -1288,8 +1292,8 @@ connect(0) ->
 connect(Tries) ->
     Config = ns_config:get(),
     Port = ns_config:search_node_prop(Config, memcached, dedicated_port),
-    User = ns_config:search_node_prop(Config, memcached, admin_user),
-    Pass = ns_config:search_node_prop(Config, memcached, admin_pass),
+    User = get_user(Config),
+    Pass = get_password(Config),
     try
         {ok, S} = gen_tcp:connect("127.0.0.1", Port,
                                   [binary,
@@ -1629,3 +1633,18 @@ config_reload() ->
               {ok, Sock} = connect(1),
               mc_client_binary:config_reload(Sock)
       end).
+
+get_user(Config) ->
+    get_user(Config, node()).
+
+get_user(Config, Node) ->
+    ns_config:search_node_prop(Node, Config, memcached, admin_user).
+
+get_password(Config) ->
+    get_password(Config, node()).
+
+get_password(Config, Node) ->
+    {ok, Password} =
+        encryption_service:maybe_decrypt_config_string(
+          ns_config:search_node_prop(Node, Config, memcached, admin_pass)),
+    Password.

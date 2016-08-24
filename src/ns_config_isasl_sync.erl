@@ -52,8 +52,8 @@ sync() ->
 start_link() ->
     Config = ns_config:get(),
     Path = ns_config:search_node_prop(Config, isasl, path),
-    AU = ns_config:search_node_prop(Config, memcached, admin_user),
-    AP = ns_config:search_node_prop(Config, memcached, admin_pass),
+    AU = ns_memcached:get_user(Config),
+    AP = ns_memcached:get_password(Config),
     start_link(Path, AU, AP).
 
 start_link(Path, AU, AP) when is_list(Path); is_list(AU); is_list(AP) ->

@@ -26,8 +26,8 @@ tap_name(VBucket, _SrcNode, DstNode) ->
 
 kill_a_bunch_of_tap_names(Bucket, Node, TapNames) ->
     Config = ns_config:get(),
-    User = ns_config:search_node_prop(Node, Config, memcached, admin_user),
-    Pass = ns_config:search_node_prop(Node, Config, memcached, admin_pass),
+    User = ns_memcached:get_user(Config, Node),
+    Pass = ns_memcached:get_password(Config, Node),
     McdPair = {Host, Port} = ns_memcached:host_port(Node),
     {ok, Sock} = gen_tcp:connect(Host, Port, [binary,
                                               {packet, 0},

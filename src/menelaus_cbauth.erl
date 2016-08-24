@@ -209,8 +209,7 @@ build_node_info(N, User, Config) ->
             end,
     {[{host, erlang:list_to_binary(Host)},
       {user, erlang:list_to_binary(User)},
-      {password,
-       erlang:list_to_binary(ns_config:search_node_prop(N, Config, memcached, admin_pass))},
+      {password, erlang:list_to_binary(ns_memcached:get_password(ns_config:latest(), N))},
       {ports, [Port || {_Key, Port} <- Services]}] ++ Local}.
 
 build_buckets_info(Config) ->
