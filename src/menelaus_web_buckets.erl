@@ -280,8 +280,10 @@ build_bucket_info(Id, BucketConfig, InfoLevel, LocalAddr, MayExposeAuth,
               {bucketType, BucketType},
               {authType, misc:expect_prop_value(auth_type, BucketConfig)},
               {saslPassword, case MayExposeAuth of
-                                 true -> list_to_binary(proplists:get_value(sasl_password, BucketConfig, ""));
-                                 _ -> <<"">>
+                                 true ->
+                                     list_to_binary(ns_bucket:sasl_password(BucketConfig));
+                                 _ ->
+                                     <<"">>
                              end},
               {proxyPort, proplists:get_value(moxi_port, BucketConfig, 0)},
               {replicaIndex, proplists:get_value(replica_index, BucketConfig, true)},
@@ -368,10 +370,7 @@ handle_sasl_buckets_streaming(_PoolId, Req) ->
                                         {nodeLocator,
                                          ns_bucket:node_locator(BucketInfo)},
                                         {saslPassword,
-                                         list_to_binary(
-                                           proplists:get_value(
-                                             sasl_password, BucketInfo,
-                                             ""))},
+                                         list_to_binary(ns_bucket:sasl_password(BucketInfo))},
                                         {nodes, BucketNodes} | VBM]}
                       end, SASLBuckets),
                 {just_write, {struct, [{buckets, List}]}}
@@ -430,7 +429,13 @@ extract_bucket_props(BucketId, Props) ->
         "default" -> lists:keyreplace(auth_type, 1,
                                       [{sasl_password, ""} | lists:keydelete(sasl_password, 1, ImportantProps)],
                                       {auth_type, sasl});
-        _ -> ImportantProps
+        _ ->
+            case cluster_compat_mode:is_cluster_46() of
+                true ->
+                    encryption_service_manager:encrypt_bucket_password(ImportantProps);
+                false ->
+                    ImportantProps
+            end
     end.
 
 -record(bv_ctx, {

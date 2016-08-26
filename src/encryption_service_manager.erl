@@ -28,7 +28,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([upgrade_config_to_46/1]).
+-export([upgrade_config_to_46/1, encrypt_bucket_password/1]).
 
 init([]) ->
     Self = self(),
@@ -43,6 +43,7 @@ init([]) ->
 
 upgrade_config_to_46(Config) ->
     encrypt_memcached_passwords(Config) ++
+        encrypt_bucket_passwords(Config) ++
         case ns_config:search(Config, encrypted_data_key) of
             {value, _} ->
                 [];
@@ -62,6 +63,33 @@ encrypt_memcached_passwords(Config) ->
               (_, _, Acc) ->
                   Acc
           end, [], Config).
+
+encrypt_bucket_passwords(Config) ->
+    {value, Buckets} = ns_config:search(Config, buckets),
+    {value, {configs, Configs}} = lists:keysearch(configs, 1, Buckets),
+    NewConfigs =
+        lists:map(
+          fun ({Name, BucketProps}) ->
+                  {Name, encrypt_bucket_password(BucketProps)}
+          end, Configs),
+    case NewConfigs of
+        Configs ->
+            [];
+        _ ->
+            NewBuckets = lists:keyreplace(configs, 1, Buckets, {configs, NewConfigs}),
+            [{set, buckets, NewBuckets}]
+    end.
+
+encrypt_bucket_password(BucketProps) ->
+    case lists:keysearch(sasl_password, 1, BucketProps) of
+        false ->
+            BucketProps;
+        {value, {sasl_password, []}} ->
+            BucketProps;
+        {value, {sasl_password, Password}} ->
+            EncryptedPassword = encryption_service:encrypt_config_string(Password),
+            lists:keyreplace(sasl_password, 1, BucketProps, {sasl_password, EncryptedPassword})
+    end.
 
 config_change_detector({encrypted_data_key, _}, Parent) ->
     Parent ! notify_service,

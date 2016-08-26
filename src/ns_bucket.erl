@@ -61,6 +61,7 @@
          ram_quota/1,
          raw_ram_quota/1,
          sasl_password/1,
+         has_password/1,
          set_bucket_config/2,
          set_fast_forward_map/2,
          set_map/2,
@@ -167,7 +168,7 @@ config_string(BucketName) ->
                          {nonempty_string(), string()}.
 credentials(Bucket) ->
     {ok, BucketConfig} = get_bucket(Bucket),
-    {Bucket, proplists:get_value(sasl_password, BucketConfig, "")}.
+    {Bucket, sasl_password(BucketConfig)}.
 
 -spec couchbase_bucket_exists(binary()) -> boolean().
 couchbase_bucket_exists(Bucket) ->
@@ -426,7 +427,13 @@ auth_type(Bucket) ->
     proplists:get_value(auth_type, Bucket).
 
 sasl_password(Bucket) ->
-    proplists:get_value(sasl_password, Bucket, "").
+    {ok, Password} =
+        encryption_service:maybe_decrypt_config_string(
+          proplists:get_value(sasl_password, Bucket, "")),
+    Password.
+
+has_password(Bucket) ->
+    proplists:get_value(sasl_password, Bucket, "") =/= "".
 
 moxi_port(Bucket) ->
     proplists:get_value(moxi_port, Bucket).

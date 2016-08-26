@@ -121,8 +121,7 @@ initiate_write(State) ->
 -spec extract_creds(list()) -> [{_,_}].
 extract_creds(ConfigList) ->
     Configs = proplists:get_value(configs, ConfigList),
-    lists:sort([{BucketName,
-                 proplists:get_value(sasl_password, BucketConfig, "")}
+    lists:sort([{BucketName, ns_bucket:sasl_password(BucketConfig)}
                 || {BucketName, BucketConfig} <- Configs]).
 
 

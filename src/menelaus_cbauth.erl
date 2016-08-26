@@ -219,7 +219,7 @@ build_buckets_info(Config) ->
                         {password,
                          case proplists:get_value(auth_type, BucketProps) of
                              sasl ->
-                                 erlang:list_to_binary(ns_bucket:sasl_password(BucketProps));
+                                 list_to_binary(ns_bucket:sasl_password(BucketProps));
                              none ->
                                  <<"">>
                          end}]}
