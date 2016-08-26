@@ -1054,7 +1054,9 @@ do_complete_join(NodeKVList) ->
                         {error, join_race_detected,
                          <<"Node is already part of cluster.">>, system_not_joinable};
                     true ->
-                        perform_actual_join(OtpNode, OtpCookie)
+                        ClusterCompat =
+                            expect_json_property_integer(<<"clusterCompatibility">>, NodeKVList),
+                        perform_actual_join(OtpNode, OtpCookie, ClusterCompat)
                 end;
             Error -> Error
         end
@@ -1064,8 +1066,18 @@ do_complete_join(NodeKVList) ->
              Exc}
     end.
 
+maybe_decrypt_admin_pass({Key, Props}, ClusterCompat) ->
+    case cluster_compat_mode:effective_cluster_compat_version_for(?VERSION_46) > ClusterCompat of
+        true ->
+            ?log_debug("Joining pre 4.6 cluster. Need to decrypt admin_pass, so the cluster could understand it"),
+            Password = proplists:get_value(admin_pass, Props),
+            {ok, DecryptedPassword} = encryption_service:maybe_decrypt_config_string(Password),
+            {Key, lists:keyreplace(admin_pass, 1, Props, {admin_pass, DecryptedPassword})};
+        false ->
+            update_vclock
+    end.
 
-perform_actual_join(RemoteNode, NewCookie) ->
+perform_actual_join(RemoteNode, NewCookie, ClusterCompat) ->
     ?cluster_log(0002, "Node ~p is joining cluster via node ~p.",
                  [node(), RemoteNode]),
     %% let ns_memcached know that we don't need to preserve data at all
@@ -1101,6 +1113,8 @@ perform_actual_join(RemoteNode, NewCookie) ->
                              ({nodes_wanted, _} = X, _) -> X;
                              ({{node, _, membership}, _}, {_, BlackSpot}) -> BlackSpot;
                              ({{node, _, services}, _}, {_, BlackSpot}) -> BlackSpot;
+                             ({{node, Node, memcached}, _} = X, _) when Node =:= MyNode ->
+                                 maybe_decrypt_admin_pass(X, ClusterCompat);
                              ({{node, Node, _}, _}, _) when Node =:= MyNode -> update_vclock;
                              (_, {_, BlackSpot}) -> BlackSpot
                          end),
