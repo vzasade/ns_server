@@ -19,7 +19,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([default/0, upgrade_config/1, get_current_version/0]).
+-export([default/0, upgrade_config/1, get_current_version/0, ensure_data_dir/0]).
 
 -define(ISASL_PW, "isasl.pw").
 -define(NS_LOG, "ns_log").

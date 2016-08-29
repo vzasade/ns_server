@@ -23,7 +23,10 @@
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--export([decrypt/1, encrypt/1]).
+-export([set_password/1,
+         set_initial_cookie/0,
+         decrypt/1,
+         encrypt/1]).
 
 -record(state, {
           gosecrets :: pid(),
@@ -33,6 +36,12 @@
 data_key_store_path() ->
     filename:join(path_config:component_path(data, "config"), "encrypted_data_keys").
 
+babysitter_init_path() ->
+    filename:join(path_config:component_path(data), "babysitter_init").
+
+set_password(Password) ->
+    gen_server:call(?MODULE, {set_password, Password}, infinity).
+
 encrypt(Data) ->
     gen_server:call({?MODULE, ns_server:get_babysitter_node()}, {encrypt, Data}, infinity).
 
@@ -41,6 +50,55 @@ decrypt(Data) ->
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+generate_cookie() ->
+    {A1, A2, A3} = erlang:now(),
+    random:seed(A1, A2, A3),
+    list_to_atom(misc:rand_str(16)).
+
+set_initial_cookie() ->
+    Cookie = generate_cookie(),
+    erlang:set_cookie(node(), Cookie),
+    case os:getenv("CB_WAIT_FOR_MASTER_PASSWORD") of
+        "true" ->
+            ns_config_default:ensure_data_dir(),
+            Content = misc:node_name_short() ++ ":" ++ atom_to_list(Cookie),
+            ok = misc:atomic_write_file(babysitter_init_path(),
+                                        list_to_binary(Content));
+        _ ->
+            ok
+    end.
+
+reset_cookie() ->
+    Cookie = generate_cookie(),
+    erlang:set_cookie(node(), Cookie).
+
+prompt_the_password(EncryptedDataKey, State) ->
+    ?log_debug("Waiting for the master password to be supplied"),
+    {Resp, ReplyTo} =
+        receive
+            {'$gen_call', From, {set_password, P}} ->
+                ok = set_password(P, State),
+                case EncryptedDataKey of
+                    undefined ->
+                        {ok, From};
+                    _ ->
+                        Ret = call_gosecrets({set_data_key, EncryptedDataKey}, State),
+                        case Ret of
+                            ok ->
+                                {ok, From};
+                            Error ->
+                                ?log_error("Incorrect master password. Error: ~p", [Error]),
+                                {auth_failure, From}
+                        end
+                end
+        end,
+    gen_server:reply(ReplyTo, Resp),
+    Resp.
+
+set_password(Password, State) ->
+    ?log_debug("Sending password to gosecrets"),
+    call_gosecrets({set_password, Password}, State).
 
 init([]) ->
     Path = data_key_store_path(),
@@ -54,16 +112,25 @@ init([]) ->
                 undefined
         end,
     State = start_gosecrets(#state{}),
-    Password =
-        case os:getenv("CB_MASTER_PASSWORD") of
-            false ->
-                "";
-            S ->
-                S
-        end,
-    ?log_debug("Sending password to gosecrets"),
-    ok = call_gosecrets({set_password, Password}, State),
-
+    case os:getenv("CB_WAIT_FOR_MASTER_PASSWORD") of
+        "true" ->
+            case prompt_the_password(EncryptedDataKey, State) of
+                ok ->
+                    reset_cookie(),
+                    ok;
+                auth_failure ->
+                    exit(incorrect_master_password)
+            end;
+        _ ->
+            Password =
+                case os:getenv("CB_MASTER_PASSWORD") of
+                    false ->
+                        "";
+                    S ->
+                        S
+                end,
+            ok = set_password(Password, State)
+    end,
     EncryptedDataKey1 =
         case EncryptedDataKey of
             undefined ->
@@ -84,6 +151,8 @@ init([]) ->
     end,
     {ok, State}.
 
+handle_call({set_password, _}, _From, State) ->
+    {reply, {error, not_allowed}, State};
 handle_call({encrypt, Data}, _From, State) ->
     {reply, call_gosecrets({encrypt, Data}, State), State};
 handle_call({decrypt, Data}, _From, State) ->
