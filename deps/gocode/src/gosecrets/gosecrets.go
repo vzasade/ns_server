@@ -107,6 +107,8 @@ func (s *encryptionService) processCommand() {
 		s.cmdEncrypt(data)
 	case 6:
 		s.cmdDecrypt(data)
+	case 7:
+		s.cmdTestDataKey(data)
 	default:
 		panic(fmt.Sprintf("Unknown command %v", command))
 	}
@@ -173,6 +175,18 @@ func (s *encryptionService) cmdDecrypt(data []byte) {
 		return
 	}
 	replySuccessWithData(plaintext)
+}
+
+func (s *encryptionService) cmdTestDataKey(data []byte) {
+	if s.lockKey == nil {
+		panic("Password was not set")
+	}
+	_, err := aesgcmDecrypt(s.lockKey, data)
+	if err != nil {
+		replyError(err.Error())
+	} else {
+		replySuccess()
+	}
 }
 
 func aesgcmEncrypt(key []byte, data []byte) []byte {

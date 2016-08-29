@@ -29,6 +29,7 @@
          set_encrypted_data_key/1,
          decrypt/1,
          encrypt/1,
+         test_encrypted_data_key/1,
          encrypt_config_string/1,
          maybe_decrypt_config_string/1
         ]).
@@ -54,6 +55,9 @@ set_password(Password) ->
 set_encrypted_data_key(DataKey) ->
     ok = misc:atomic_write_file(data_key_store_path(), DataKey),
     {?MODULE, ns_server:get_babysitter_node()} ! update_encrypted_data_key.
+
+test_encrypted_data_key(DataKey) ->
+    gen_server:call(?MODULE, {test_encrypted_data_key, DataKey}, infinity).
 
 encrypt(Data) ->
     gen_server:call({?MODULE, ns_server:get_babysitter_node()}, {encrypt, Data}, infinity).
@@ -190,6 +194,8 @@ handle_call({encrypt, Data}, _From, State) ->
     {reply, call_gosecrets({encrypt, Data}, State), State};
 handle_call({decrypt, Data}, _From, State) ->
     {reply, call_gosecrets({decrypt, Data}, State), State};
+handle_call({test_encrypted_data_key, DataKey}, _From, State) ->
+    {reply, call_gosecrets({test_data_key, DataKey}, State), State};
 handle_call(_, _From, State) ->
     {reply, {error, not_allowed}, State}.
 
@@ -277,4 +283,6 @@ encode(get_data_key) ->
 encode({encrypt, Data}) ->
     <<5, Data/binary>>;
 encode({decrypt, Data}) ->
-    <<6, Data/binary>>.
+    <<6, Data/binary>>;
+encode({test_data_key, Data}) ->
+    <<7, Data/binary>>.
