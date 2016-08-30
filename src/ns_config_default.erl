@@ -19,7 +19,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([default/0, upgrade_config/1, get_current_version/0, ensure_data_dir/0]).
+-export([default/0, upgrade_config/1, get_current_version/0, ensure_data_dir/0, encrypt/1, decrypt/1]).
 
 -define(ISASL_PW, "isasl.pw").
 -define(NS_LOG, "ns_log").
@@ -594,6 +594,37 @@ do_upgrade_config_from_4_1_1_to_4_5(DefaultConfig) ->
     [{set, ConfKey, McdConfig},
      {set, DefaultsKey, McdDefaults},
      {set, CompactionDaemonKey, CompactionDaemonCfg}].
+
+encrypt_config_val(Val) when is_list(Val) ->
+    {ok, Encrypted} = encryption_service:encrypt(list_to_binary(Val)),
+    {encrypted, string, Encrypted};
+encrypt_config_val(Val) when is_binary(Val) ->
+    {ok, Encrypted} = encryption_service:encrypt(Val),
+    {encrypted, binary, Encrypted}.
+
+encrypt(Config) ->
+    misc:rewrite_tuples(fun ({admin_pass, Pass}) ->
+                                {stop, {admin_pass, encrypt_config_val(Pass)}};
+                            ({sasl_password, Pass}) ->
+                                {stop, {sasl_password, encrypt_config_val(Pass)}};
+                            ({metakv_sensitive, Val}) ->
+                                {stop, {metakv_sensitive, encrypt_config_val(Val)}};
+                            (T) ->
+                                {continue, T}
+                        end, Config).
+
+decrypt(Config) ->
+    misc:rewrite_tuples(fun ({encrypted, Type, Val}) when is_binary(Val) ->
+                                {ok, Decrypted} = encryption_service:decrypt(Val),
+                                {stop, case Type of
+                                           string ->
+                                               binary_to_list(Decrypted);
+                                           binary ->
+                                               Decrypted
+                                       end};
+                            (T) ->
+                                {continue, T}
+                        end, Config).
 
 upgrade_2_3_0_to_3_0_test() ->
     Cfg = [[{some_key, some_value},

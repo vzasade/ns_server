@@ -70,6 +70,12 @@ default() -> [].
 
 upgrade_config(_) -> [].
 
+encrypt(Config) ->
+    Config.
+
+decrypt(Config) ->
+    Config.
+
 test_search_list() ->
     ?assertMatch(false, ns_config:search([], foo)),
     ?assertMatch(false, ns_config:search([[], []], foo)),

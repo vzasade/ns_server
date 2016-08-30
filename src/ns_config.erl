@@ -695,6 +695,12 @@ upgrade_config(Config) ->
                end,
     upgrade_config(Config, Upgrader).
 
+encrypt(Cfg = #config{dynamic = Dynamic, policy_mod = PolicyMod}) ->
+    Cfg#config{dynamic = PolicyMod:encrypt(Dynamic)}.
+
+decrypt(PolicyMod, Dynamic) ->
+    PolicyMod:decrypt(Dynamic).
+
 upgrade_config(Config, Upgrader) ->
     do_upgrade_config(Config, Upgrader(Config), Upgrader).
 
@@ -794,7 +800,8 @@ init({full, ConfigPath, DirPath, PolicyMod} = Init) ->
         {ok, Config} ->
             do_init(Config#config{init = Init,
                                   saver_mfa = {?MODULE, save_config_sync, []},
-                                  upgrade_config_fun = fun upgrade_config/1});
+                                  upgrade_config_fun = fun upgrade_config/1,
+                                  encrypt_fun = fun encrypt/1});
         Error ->
             {stop, Error}
     end;
@@ -805,6 +812,7 @@ init({pull_from_node, Node} = Init) ->
                   policy_mod = ns_config_default,
                   saver_mfa = {?MODULE, do_not_save_config, []},
                   upgrade_config_fun = fun (C) -> C end,
+                  encrypt_fun = fun (C) -> C end,
                   init = Init},
     do_init(Cfg);
 init([ConfigPath, PolicyMod]) ->
@@ -1084,7 +1092,7 @@ load_config(ConfigPath, DirPath, PolicyMod) ->
             ?log_info("Loading dynamic config from ~p", [C]),
             Dynamic0 = case load_file(bin, C) of
                            {ok, DRead} ->
-                               DRead;
+                               decrypt(PolicyMod, DRead);
                            not_found ->
                                ?log_info("No dynamic config file found. Assuming we're brand new node"),
                                [[]]
@@ -1134,7 +1142,8 @@ initiate_save_config(Config) ->
     case Config#config.saver_pid of
         undefined ->
             {M, F, ASuffix} = Config#config.saver_mfa,
-            A = [Config | ASuffix],
+            EncryptedConfig = (Config#config.encrypt_fun)(Config),
+            A = [EncryptedConfig | ASuffix],
             Pid = proc_lib:spawn_link(M, F, A),
             Config#config{saver_pid = Pid,
                           pending_more_save = false};
@@ -1613,6 +1622,7 @@ setup_with_saver() ->
                              policy_mod = ns_config_default,
                              saver_mfa = {?MODULE, send_config, [save_config_target]},
                              upgrade_config_fun = fun upgrade_config/1,
+                             encrypt_fun = fun (C) -> C end,
                              uuid = testuuid},
                {ok, _} = ns_config:start_link({with_state, Cfg}),
                MRef = erlang:monitor(process, Parent),

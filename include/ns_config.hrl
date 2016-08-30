@@ -6,7 +6,8 @@
                  saver_pid,
                  pending_more_save = false,
                  uuid,
-                 upgrade_config_fun
+                 upgrade_config_fun,
+                 encrypt_fun
                 }).
 -define(METADATA_VCLOCK, '_vclock').
 -define(DELETED_MARKER, '_deleted').
