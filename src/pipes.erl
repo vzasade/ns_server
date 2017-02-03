@@ -42,7 +42,7 @@
 %% API
 -spec fold(producer(Event), fun ((Event, State) -> State), State) -> State.
 fold(Producer, Handler, InitState) ->
-    with_state(
+    misc:with_state(
       fun (Get, Put) ->
               Producer(
                 fun (Event) ->
@@ -367,21 +367,6 @@ pack_to_list({Data, Bytes, N}) ->
     Packed = [[<<?VERSION_TAG, ?LIST_HEAD, N:32/big>> | Data] | <<?NIL>>],
     PackedSize = Bytes + 7,
     {Packed, PackedSize}.
-
-%% internal
-with_state(Body, InitState) ->
-    Ref = make_ref(),
-    erlang:put(Ref, InitState),
-
-    Get = fun () -> erlang:get(Ref) end,
-    Put = fun (S) -> erlang:put(Ref, S) end,
-
-    try
-        Body(Get, Put),
-        Get()
-    after
-        erlang:erase(Ref)
-    end.
 
 -ifdef(EUNIT).
 

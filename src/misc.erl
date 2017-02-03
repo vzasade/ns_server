@@ -1964,3 +1964,17 @@ ejson_encode_pretty(Json) ->
                 sjson:encode_json([{compact, false},
                                    {strict, false}]),
                 pipes:collect())).
+
+with_state(Body, InitState) ->
+    Ref = make_ref(),
+    erlang:put(Ref, InitState),
+
+    Get = fun () -> erlang:get(Ref) end,
+    Put = fun (S) -> erlang:put(Ref, S) end,
+
+    try
+        Body(Get, Put),
+        Get()
+    after
+        erlang:erase(Ref)
+    end.
