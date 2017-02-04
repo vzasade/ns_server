@@ -311,6 +311,17 @@ collect_result(Port, Acc) ->
             collect_result(Port, [Msg | Acc])
     end.
 
+remove_struct({struct, KVs}) when is_list(KVs) ->
+    remove_struct({KVs});
+remove_struct({KVs}) when is_list(KVs) ->
+    {[remove_struct(KV) || KV <- KVs]};
+remove_struct(List) when is_list(List) ->
+    [remove_struct(Elem) || Elem <- List];
+remove_struct({K, V}) ->
+    {K, remove_struct(V)};
+remove_struct(V) ->
+    V.
+
 build_memcached_auth_info(UserPasswords) ->
     Iterations = ns_config:read_key_fast(memcached_password_hash_iterations, 4000),
     Port = ns_ports_setup:run_cbsasladm(Iterations),
@@ -322,7 +333,7 @@ build_memcached_auth_info(UserPasswords) ->
     Port ! {self(), {command, <<"\n">>}},
     {0, Json} = collect_result(Port, []),
     {struct, [{<<"users">>, Infos}]} = mochijson2:decode(Json),
-    Infos.
+    [remove_struct(I) || I <- Infos].
 
 collect_users(asterisk, _Role, Dict) ->
     Dict;
