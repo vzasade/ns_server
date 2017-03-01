@@ -95,7 +95,7 @@ make_producer(#state{buckets = Buckets,
                    sjson:encode_extended_json([{compact, false},
                                                {strict, false}])]).
 
-jsonify_auth(AU, AP, Buckets) ->
+jsonify_auth(AU, AP, _Buckets) ->
     ?make_transducer(
        begin
            ?yield(object_start),
@@ -103,7 +103,7 @@ jsonify_auth(AU, AP, Buckets) ->
            ?yield(array_start),
 
            %% TODO: remove buckets after upgrade will be implemented
-           AdminAndBuckets = menelaus_users:build_memcached_auth_info([{AU, AP} | Buckets]),
+           AdminAndBuckets = menelaus_users:build_memcached_auth_info([{AU, AP}]),
            lists:foreach(
              fun (AdminOrBucket) ->
                      ?yield({json, AdminOrBucket})

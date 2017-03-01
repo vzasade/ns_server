@@ -175,17 +175,6 @@ jsonify_users(AU, Buckets, RoleDefinitions) ->
            ?yield(object_start),
            ?yield({kv, memcached_admin_json(AU, Buckets)}),
 
-           %% TODO: to be removed after buckets will be upgraded to builtin users
-           Dict1 =
-               lists:foldl(
-                 fun (Bucket, Dict) ->
-                         Roles = menelaus_roles:get_roles({Bucket, bucket}),
-                         {Permissions, NewDict} =
-                             permissions_for_user(Roles, Buckets, RoleDefinitions, Dict),
-                         ?yield({kv, jsonify_user({Bucket, builtin}, Permissions)}),
-                         NewDict
-                 end, dict:new(), Buckets),
-
            pipes:fold(
              ?producer(),
              fun ({{user, Identity}, Props}, Dict) ->
@@ -194,7 +183,7 @@ jsonify_users(AU, Buckets, RoleDefinitions) ->
                          permissions_for_user(Roles, Buckets, RoleDefinitions, Dict),
                      ?yield({kv, jsonify_user(Identity, Permissions)}),
                      NewDict
-             end, Dict1),
+             end, dict:new()),
            ?yield(object_end)
        end).
 

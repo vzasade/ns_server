@@ -28,7 +28,6 @@
          get_creds/2,
          is_system_provisioned/0,
          is_system_provisioned/1,
-         get_no_auth_buckets/1,
          hash_password/1,
          hash_password/2]).
 
@@ -99,12 +98,7 @@ authenticate(Username, Password) ->
                         true ->
                             {ok, {Username, builtin}};
                         false ->
-                            case is_bucket_auth(Username, Password) of
-                                true ->
-                                    {ok, {Username, bucket}};
-                                false ->
-                                    false
-                            end
+                            false
                     end
             end
     end.
@@ -137,23 +131,3 @@ hash_password(Salt, Password) ->
         end,
 
     erlang:apply(crypto, F, A).
-
-is_bucket_auth(User, Password) ->
-    case ns_bucket:get_bucket(User) of
-        {ok, BucketConf} ->
-            case {proplists:get_value(auth_type, BucketConf),
-                  proplists:get_value(sasl_password, BucketConf)} of
-                {none, _} ->
-                    Password =:= "";
-                {sasl, P} ->
-                    Password =:= P
-            end;
-        not_present ->
-            false
-    end.
-
-get_no_auth_buckets(Config) ->
-    [BucketName ||
-        {BucketName, BucketProps} <- ns_bucket:get_buckets(Config),
-        proplists:get_value(auth_type, BucketProps) =:= none orelse
-            proplists:get_value(sasl_password, BucketProps) =:= ""].
