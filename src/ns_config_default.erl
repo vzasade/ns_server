@@ -345,7 +345,8 @@ default() ->
         {audit_file, {"~s", [audit_file]}},
         {rbac_file, {"~s", [rbac_file]}},
         {dedupe_nmvb_maps, dedupe_nmvb_maps},
-        {xattr_enabled, {memcached_config_mgr, is_enabled, [?VERSION_50]}}
+        {xattr_enabled, {memcached_config_mgr, is_enabled, [?VERSION_50]}},
+        {collections_prototype, {memcached_config_mgr, is_enabled, [?VULCAN_VERSION_NUM]}}
        ]}},
 
      {memory_quota, KvQuota},
