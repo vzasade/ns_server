@@ -135,7 +135,7 @@ config_string(BucketName) ->
                       "alog_path=~s;data_traffic_enabled=false;max_num_workers=~B;"
                       "uuid=~s;"
                       "conflict_resolution_type=~s;"
-                      "bucket_type=~s;~s",
+                      "bucket_type=~s;",
                       [proplists:get_value(
                          ht_locks, BucketConfig,
                          misc:getenv_int("MEMBASE_HT_LOCKS", 47)),
@@ -147,18 +147,19 @@ config_string(BucketName) ->
                        NumThreads,
                        BucketUUID,
                        ConflictResolutionType,
-                       storage_mode_to_bucket_type(StorageMode),
-                       eviction_policy_cfg_string(BucketConfig, ItemEvictionPolicy,
-                                                  EphemeralFullPolicy)]),
-                CFG1 = metadata_purge_age_cfg_string(EphemeralPurgeAge) ++ CFG,
-                CFG2 = ht_size_cfg_string(BucketConfig) ++ CFG1,
-                {CFG2, {MemQuota, DBSubDir, NumThreads, ItemEvictionPolicy, EphemeralFullPolicy,
+                       storage_mode_to_bucket_type(StorageMode)]) ++
+                    eviction_policy_cfg_string(BucketConfig, ItemEvictionPolicy,
+                                               EphemeralFullPolicy) ++
+                    metadata_purge_age_cfg_string(EphemeralPurgeAge) ++
+                    ht_size_cfg_string(BucketConfig) ++
+                    collections_cfg_string(BucketConfig),
+                {CFG, {MemQuota, DBSubDir, NumThreads, ItemEvictionPolicy, EphemeralFullPolicy,
                        DriftThresholds, EphemeralPurgeAge}, DBSubDir};
             memcached ->
                 {io_lib:format("cache_size=~B;uuid=~s", [MemQuota, BucketUUID]),
                  MemQuota, undefined}
         end,
-    ConfigString = lists:flatten([DynamicConfigString, $;, StaticConfigString,
+    ConfigString = lists:flatten([DynamicConfigString, StaticConfigString,
                                   $;, ExtraConfigString]),
     {Engine, ConfigString, BucketType, ExtraParams, ReturnDBDir}.
 
@@ -270,9 +271,9 @@ eviction_policy(BucketConfig) ->
 eviction_policy_cfg_string(BucketConfig, ItemEvictionPolicy, EphemeralFullPolicy) ->
     case storage_mode(BucketConfig) of
         couchstore ->
-            io_lib:format("item_eviction_policy=~s", [ItemEvictionPolicy]);
+            io_lib:format("item_eviction_policy=~s;", [ItemEvictionPolicy]);
         ephemeral ->
-            io_lib:format("ephemeral_full_policy=~s", [EphemeralFullPolicy])
+            io_lib:format("ephemeral_full_policy=~s;", [EphemeralFullPolicy])
     end.
 
 %% The 'item_eviction_policy' is applicable only for couchbase buckets. Consequently,
@@ -329,6 +330,14 @@ ht_size_cfg_string(BucketConfig) ->
             [];
         X when is_integer(X) ->
             io_lib:format("ht_size=~B;", [X])
+    end.
+
+collections_cfg_string(BucketConfig) ->
+    case collections:get(BucketConfig) of
+        undefined ->
+            [];
+        _ ->
+            "collections_prototype_enabled=true;"
     end.
 
 -spec storage_mode([{_,_}]) -> atom().
