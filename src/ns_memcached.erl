@@ -74,7 +74,8 @@
           timer::any(),
           work_requests = [],
           warmup_stats = [] :: [{binary(), binary()}],
-          check_config_pid = undefined :: undefined | pid()
+          check_config_pid = undefined :: undefined | pid(),
+          collections_manifest = undefined
          }).
 
 %% external API
@@ -623,13 +624,16 @@ do_handle_call(_, _From, State) ->
     {reply, unhandled, State}.
 
 handle_cast({connect_done, WorkersCount, RV}, #state{bucket = Bucket,
-                                                     status = OldStatus} = State) ->
+                                                     status = OldStatus,
+                                                     collections_manifest = OldCollectionsManifest}
+            = State) ->
     gen_event:notify(buckets_events, {started, Bucket}),
     erlang:process_flag(trap_exit, true),
 
     case RV of
         {ok, Sock} ->
-            try ensure_bucket(Sock, Bucket) of
+            NewCollectionsManifest = get_collections_manifest(Bucket),
+            try ensure_bucket(Sock, Bucket, OldCollectionsManifest, NewCollectionsManifest) of
                 ok ->
                     connecting = OldStatus,
 
@@ -643,7 +647,8 @@ handle_cast({connect_done, WorkersCount, RV}, #state{bucket = Bucket,
                                      timer = Timer,
                                      start_time = os:timestamp(),
                                      sock = Sock,
-                                     status = init
+                                     status = init,
+                                     collections_manifest = NewCollectionsManifest
                                     },
                     [proc_lib:spawn_link(erlang, apply, [fun worker_init/2, [Self, InitialState]])
                      || _ <- lists:seq(1, WorkersCount)],
@@ -708,10 +713,18 @@ handle_info(check_started,
             {ok, S} = Stats,
             {noreply, State#state{warmup_stats = S}}
     end;
-handle_info(check_config, #state{check_config_pid = undefined} = State) ->
+handle_info(check_config, #state{check_config_pid = undefined,
+                                 bucket = Bucket,
+                                 collections_manifest = OldCollectionsManifest} = State) ->
     misc:flush(check_config),
-    Pid = proc_lib:start_link(erlang, apply, [fun run_check_config/2, [State#state.bucket, self()]]),
-    {noreply, State#state{check_config_pid = Pid}};
+    NewCollectionsManifest = get_collections_manifest(Bucket),
+    Pid = proc_lib:start_link(erlang, apply, [fun run_check_config/4,
+                                              [Bucket,
+                                               OldCollectionsManifest,
+                                               NewCollectionsManifest,
+                                               self()]]),
+    {noreply, State#state{check_config_pid = Pid,
+                          collections_manifest = NewCollectionsManifest}};
 handle_info(check_config, State) ->
     {noreply, State};
 handle_info({'EXIT', Pid, normal}, #state{check_config_pid = Pid} = State) ->
@@ -796,12 +809,12 @@ code_change(_OldVsn, State, _Extra) ->
 %% API
 %%
 
-run_check_config(Bucket, Parent) ->
+run_check_config(Bucket, OldCollectionsManifest, NewCollectionsManifest, Parent) ->
     proc_lib:init_ack(Parent, self()),
     perform_very_long_call(
       fun(Sock) ->
               StartTS = os:timestamp(),
-              ok = ensure_bucket(Sock, Bucket),
+              ok = ensure_bucket(Sock, Bucket, OldCollectionsManifest, NewCollectionsManifest),
               Diff = timer:now_diff(os:timestamp(), StartTS),
               if
                   Diff > ?SLOW_CALL_THRESHOLD_MICROS ->
@@ -1192,12 +1205,18 @@ connect(Tries) ->
     end.
 
 
-ensure_bucket(Sock, Bucket) ->
+ensure_bucket(Sock, Bucket, OldCollectionsManifest, NewCollectionsManifest) ->
     try ns_bucket:config_string(Bucket) of
         {Engine, ConfigString, BucketType, ExtraParams, DBSubDir} ->
             case mc_client_binary:select_bucket(Sock, Bucket) of
                 ok ->
-                    ensure_bucket_config(Sock, Bucket, BucketType, ExtraParams);
+                    CollectionsResult =
+                        ensure_collections_manifest(Sock, Bucket,
+                                                    OldCollectionsManifest,
+                                                    NewCollectionsManifest, false),
+                    ok = ensure_bucket_config(Sock, Bucket, BucketType,
+                                              ExtraParams ++ [CollectionsResult]),
+                    CollectionsResult;
                 {memcached_error, key_enoent, _} ->
                     ok = filelib:ensure_dir(DBSubDir),
                     case mc_client_binary:create_bucket(Sock, Bucket, Engine,
@@ -1205,7 +1224,9 @@ ensure_bucket(Sock, Bucket) ->
                         ok ->
                             ?log_info("Created bucket ~p with config string ~p",
                                       [Bucket, ConfigString]),
-                            ok = mc_client_binary:select_bucket(Sock, Bucket);
+                            ok = mc_client_binary:select_bucket(Sock, Bucket),
+                            ok = ensure_collections_manifest(Sock, Bucket, OldCollectionsManifest,
+                                                             NewCollectionsManifest, true);
                         Error ->
                             {error, {bucket_create_error, Error}}
                     end;
@@ -1219,6 +1240,43 @@ ensure_bucket(Sock, Bucket) ->
             {E, R}
     end.
 
+get_collections_manifest(Bucket) ->
+    case ns_bucket:get_bucket(Bucket) of
+        {ok, BucketConfig} ->
+            collections:get(BucketConfig);
+        _ ->
+            undefined
+    end.
+
+ensure_collections_manifest(Sock, Bucket, OldCollectionsManifest,
+                            NewCollectionsManifest, JustStarted) ->
+    RV =
+        case NewCollectionsManifest of
+            OldCollectionsManifest ->
+                ok;
+            undefined ->
+                {ok, needs_restart, "disabled"};
+            {Separator, Collections} ->
+                Json = {[{separator, list_to_binary(Separator)},
+                         {collections,
+                          [{[{name, list_to_binary(Name)}, {uid, UID}]} ||
+                              {Name, UID} <- Collections]}]},
+                ok = mc_client_binary:set_collections_manifest(Sock, ejson:encode(Json)),
+                case {OldCollectionsManifest, JustStarted} of
+                    {undefined, false} ->
+                        {ok, needs_restart, "enabled"};
+                    _ ->
+                        ok
+                end
+        end,
+    case RV of
+        {ok, needs_restart, Enabled} ->
+            ale:info(?USER_LOGGER, "Collections on bucket ~s were ~s", [Bucket, Enabled]),
+            {ok, needs_restart};
+        Other ->
+            Other
+    end.
+
 -record(qstats, {max_size = missng_max_size,
                  dbname = missing_path,
                  max_num_workers = missing_num_threads,
@@ -1228,12 +1286,11 @@ ensure_bucket(Sock, Bucket) ->
                  behind_threshold = missing_behind_threshold,
                  ephemeral_metadata_purge_age = missing_ephemeral_metadata_purge_age}).
 
--spec ensure_bucket_config(port(), bucket_name(), bucket_type(),
-                           {pos_integer(), nonempty_string()}) ->
+-spec ensure_bucket_config(port(), bucket_name(), bucket_type(), list()) ->
                                   ok | no_return().
 ensure_bucket_config(Sock, Bucket, membase,
-                     {MaxSize, DBDir, NumThreads, ItemEvictionPolicy, EphemeralFullPolicy,
-                      DriftThresholds, EphemeralPurgeAge}) ->
+                     [MaxSize, DBDir, NumThreads, ItemEvictionPolicy, EphemeralFullPolicy,
+                      DriftThresholds, EphemeralPurgeAge, CollectionsResult]) ->
     {ok, #qstats{max_size = ActualMaxSize,
                  dbname = ActualDBDir,
                  max_num_workers = ActualNumThreads,
@@ -1274,7 +1331,8 @@ ensure_bucket_config(Sock, Bucket, membase,
            maybe_set_ephemeral_metadata_purge_age(Sock, Bucket, EphemeralPurgeAge, ActualPurgeAge),
            maybe_set_drift_thresholds(Sock, Bucket, DriftThresholds, ActualDAT, ActualDBT),
            maybe_set_max_size(Sock, Bucket, MaxSize, ActualMaxSize),
-           maybe_set_db_dir(Bucket, DBDir, ActualDBDir)],
+           maybe_set_db_dir(Bucket, DBDir, ActualDBDir),
+           CollectionsResult],
 
     case lists:any(fun(RV) -> RV =:= {ok, needs_restart} end, Out) of
         true ->

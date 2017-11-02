@@ -153,8 +153,8 @@ config_string(BucketName) ->
                     metadata_purge_age_cfg_string(EphemeralPurgeAge) ++
                     ht_size_cfg_string(BucketConfig) ++
                     collections_cfg_string(BucketConfig),
-                {CFG, {MemQuota, DBSubDir, NumThreads, ItemEvictionPolicy, EphemeralFullPolicy,
-                       DriftThresholds, EphemeralPurgeAge}, DBSubDir};
+                {CFG, [MemQuota, DBSubDir, NumThreads, ItemEvictionPolicy, EphemeralFullPolicy,
+                       DriftThresholds, EphemeralPurgeAge], DBSubDir};
             memcached ->
                 {io_lib:format("cache_size=~B;uuid=~s", [MemQuota, BucketUUID]),
                  MemQuota, undefined}
