@@ -87,6 +87,7 @@
 
 -define(CMD_SEQNO_PERSISTENCE, 16#b7).
 -define(CMD_GET_KEYS, 16#b8).
+-define(CMD_COLLECTIONS_SET_MANIFEST, 16#b9).
 
 -define(CMD_ISASL_REFRESH, 16#f1).
 -define(CMD_SSL_CERTS_REFRESH, 16#f2).
