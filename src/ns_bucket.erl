@@ -85,7 +85,8 @@
          can_have_views/1,
          bucket_view_nodes/1,
          bucket_config_view_nodes/1,
-         config_upgrade_to_50/1]).
+         config_upgrade_to_50/1,
+         update_bucket_config/2]).
 
 
 %%%===================================================================

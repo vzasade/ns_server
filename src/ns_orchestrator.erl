@@ -63,7 +63,8 @@
          recovery_map/2,
          is_recovery_running/0,
          ensure_janitor_run/1,
-         start_graceful_failover/1]).
+         start_graceful_failover/1,
+         update_collections/2]).
 
 -define(SERVER, {global, ?MODULE}).
 
@@ -129,6 +130,11 @@ update_bucket(BucketType, StorageMode, BucketName, UpdatedProps) ->
     gen_fsm:sync_send_all_state_event(?SERVER, {update_bucket, BucketType,
                                                 StorageMode, BucketName,
                                                 UpdatedProps}, infinity).
+
+update_collections(BucketName, Operation) ->
+    wait_for_orchestrator(),
+    gen_fsm:sync_send_all_state_event(?SERVER, {update_collections, BucketName, Operation},
+                                      infinity).
 
 %% Deletes bucket. Makes sure that once it returns it's already dead.
 %% In implementation we make sure config deletion is propagated to
@@ -399,6 +405,17 @@ handle_sync_event({update_bucket, BucketType, StorageMode, BucketName,
             %% request janitor run to fix map if the replica # has changed
             request_janitor_run({bucket, BucketName});
         _ -> ok
+    end,
+    {reply, Reply, StateName, State};
+
+handle_sync_event({update_collections, BucketName, Operation}, _From, StateName, State) ->
+    Reply = collections:update(BucketName, Operation),
+    case Reply of
+        ok ->
+            %% request janitor run to fix map if the replica # has changed
+            request_janitor_run({bucket, BucketName});
+        _ ->
+            ok
     end,
     {reply, Reply, StateName, State};
 
