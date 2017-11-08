@@ -286,6 +286,9 @@ get_action(Req, {AppRoot, IsSSL, Plugins}, Path, PathTokens) ->
                     {{[{bucket, Id}, recovery], read},
                      fun menelaus_web_recovery:handle_recovery_status/3,
                      ["default", Id]};
+                ["pools", "default", "buckets", Id, "collections"] ->
+                    {{[{bucket, Id}, collections], read},
+                     fun menelaus_web_collections:handle_get/2, [Id]};
                 ["pools", "default", "remoteClusters"] ->
                     goxdcr_rest:spec(
                       {[xdcr, remote_clusters], read},
@@ -648,6 +651,12 @@ get_action(Req, {AppRoot, IsSSL, Plugins}, Path, PathTokens) ->
                     {{[{bucket, Id}, views], compact},
                      fun menelaus_web_buckets:handle_set_ddoc_update_min_changes/4,
                      ["default", Id, DDocId]};
+                ["pools", "default", "buckets", Id, "collections"] ->
+                    {{[{bucket, Id}, collections], write},
+                     fun menelaus_web_collections:handle_post/2, [Id]};
+                ["pools", "default", "buckets", Id, "collections", "enable"] ->
+                    {{[{bucket, Id}, collections], write},
+                     fun menelaus_web_collections:handle_enable/2, [Id]};
                 ["pools", "default", "remoteClusters"] ->
                     goxdcr_rest:spec(
                       {[xdcr, remote_clusters], write},
@@ -720,6 +729,9 @@ get_action(Req, {AppRoot, IsSSL, Plugins}, Path, PathTokens) ->
                     goxdcr_rest:spec(
                       {[xdcr, remote_clusters], write},
                       fun menelaus_web_remote_clusters:handle_remote_cluster_delete/2, [Id]);
+                ["pools", "default", "buckets", Id, "collections", Name] ->
+                    {{[{bucket, Id}, collections], delete},
+                     fun menelaus_web_collections:handle_delete/3, [Id, Name]};
                 ["pools", "default", "buckets", Id, "docs", DocId] ->
                     {{[{bucket, Id}, data, docs], delete},
                      fun menelaus_web_crud:handle_delete/3, [Id, DocId]};
@@ -778,6 +790,9 @@ get_action(Req, {AppRoot, IsSSL, Plugins}, Path, PathTokens) ->
                 ["pools", "default", "serverGroups", GroupUUID] ->
                     {{[server_groups], write},
                      fun menelaus_web_groups:handle_server_group_update/2, [GroupUUID]};
+                ["pools", "default", "buckets", Id, "collections", "separator"] ->
+                    {{[{bucket, Id}, collections], write},
+                     fun menelaus_web_collections:handle_put_separator/2, [Id]};
                 ["settings", "rbac", "users", UserId] ->
                     {{[admin, security], write},
                      fun menelaus_web_rbac:handle_put_user/3, ["external", UserId]};
