@@ -145,7 +145,6 @@ prepare_db_ix_dirs(NewDbDir, NewIxDir) ->
 
     case NewDbDir =/= CurrentDbDir orelse NewIxDir =/= CurrentIxDir of
         true ->
-            ale:info(?USER_LOGGER, "Setting database directory path to ~s and index directory path to ~s", [NewDbDir, NewIxDir]),
             case misc:ensure_writable_dirs([NewDbDir, NewIxDir]) of
                 ok ->
                     case NewDbDir =:= CurrentDbDir of
@@ -173,6 +172,10 @@ prepare_db_ix_dirs(NewDbDir, NewIxDir) ->
 update_db_ix_dirs(not_changed, _NewDbDir, _NewIxDir) ->
     not_changed;
 update_db_ix_dirs(ok, NewDbDir, NewIxDir) ->
+    ale:info(?USER_LOGGER,
+             "Setting database directory path to ~s and index directory path to ~s",
+             [NewDbDir, NewIxDir]),
+
     ns_couchdb_api:set_db_and_ix_paths(NewDbDir, NewIxDir),
     setup_db_and_ix_paths([{db_path, NewDbDir},
                            {index_path, NewIxDir}]),
