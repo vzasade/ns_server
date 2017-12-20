@@ -13,6 +13,7 @@
 
     vm.onDbPathChange = onDbPathChange;
     vm.onIndexPathChange = onIndexPathChange;
+    vm.onCbasDirsChange = onCbasDirsChange;
     vm.onSubmit = onSubmit;
     vm.sendStats = true;
 
@@ -25,6 +26,7 @@
           vm.defaultConfig = _.clone(config);
           vm.onDbPathChange();
           vm.onIndexPathChange();
+          vm.onCbasDirsChange();
         });
 
       $scope.$watch('clusterConfigurationCtl.config.startNewClusterConfig', _.debounce(onMemoryQuotaChanged, 500), true);
@@ -43,6 +45,9 @@
     }
     function onIndexPathChange() {
       vm.indexPathTotal = mnClusterConfigurationService.lookup(vm.config.indexPath, vm.config.selfConfig.preprocessedAvailableStorage);
+    }
+    function onCbasDirsChange() {
+      vm.cbasDirsTotal = mnClusterConfigurationService.lookup(vm.config.cbasDirs, vm.config.selfConfig.preprocessedAvailableStorage);
     }
     function goNext() {
       var newClusterState = mnWizardService.getNewClusterState();
@@ -83,7 +88,8 @@
     function postDiskStorage() {
       return addErrorHandler(mnClusterConfigurationService.postDiskStorage({
         path: vm.config.dbPath,
-        index_path: vm.config.indexPath
+        index_path: vm.config.indexPath,
+        cbas_dirs: vm.config.cbasDirs
       }), "postDiskStorage");
     }
     function postJoinCluster() {
