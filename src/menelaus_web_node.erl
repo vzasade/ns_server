@@ -466,6 +466,8 @@ handle_node_settings_post(Node, Req) when is_atom(Node) ->
     {ok, DefaultDbPath} = ns_storage_conf:this_node_dbdir(),
     DbPath = proplists:get_value("path", Params, DefaultDbPath),
     IxPath = proplists:get_value("index_path", Params, DbPath),
+    CBASDirsStr = proplists:get_value("cbas_dirs", Params, ns_storage_conf:this_node_cbas_dirs()),
+    CBASDirs = string:tokens(CBASDirsStr, ","),
 
     case Node =/= node() of
         true -> exit('Setting the disk storage path for other servers is not yet supported.');
@@ -485,32 +487,36 @@ handle_node_settings_post(Node, Req) when is_atom(Node) ->
             ok
     end,
 
-    ValidatePath =
-        fun ({Param, Path}) ->
-                case Path of
-                    [] ->
-                        iolist_to_binary(io_lib:format("~p cannot be empty", [Param]));
-                    Path ->
-                        case misc:is_absolute_path(Path) of
-                           false ->
-                                iolist_to_binary(
-                                  io_lib:format("An absolute path is required for ~p",
-                                                [Param]));
-                           _ -> ok
-                        end
-                end
-        end,
+    Results0 =
+        lists:usort(
+          lists:map(
+            fun ({Param, Path}) ->
+                    case Path of
+                        [] ->
+                            iolist_to_binary(io_lib:format("~p cannot contain empty string", [Param]));
+                        Path ->
+                            case misc:is_absolute_path(Path) of
+                                false ->
+                                    iolist_to_binary(
+                                      io_lib:format("An absolute path is required for ~p",
+                                                    [Param]));
+                                _ -> ok
+                            end
+                    end
+            end,
+            [{path, DbPath}, {index_path, IxPath}] ++ [{cbas_dirs, Dir} || Dir <- CBASDirs])),
 
-    Results0 = lists:usort(lists:map(ValidatePath, [{path, DbPath},
-                                                    {index_path, IxPath}])),
     Results1 =
         case Results0 of
             [ok] ->
-                case ns_storage_conf:setup_disk_storage_conf(DbPath, IxPath) of
+                case ns_storage_conf:setup_disk_storage_conf(DbPath, IxPath, CBASDirs) of
                     not_changed ->
                         ok;
                     ok ->
-                        ns_audit:disk_storage_conf(Req, Node, DbPath, IxPath),
+                        ns_audit:disk_storage_conf(Req, Node, DbPath, IxPath, CBASDirs),
+                        ok;
+                    restart ->
+                        ns_audit:disk_storage_conf(Req, Node, DbPath, IxPath, CBASDirs),
                         %% NOTE: due to required restart we need to protect
                         %% ourselves from 'death signal' of parent
                         erlang:process_flag(trap_exit, true),
