@@ -15,15 +15,17 @@
 %%
 -module(indexer_gsi).
 
+-include("ns_common.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -export([start_keeper/0, get_status/1, get_indexes/0, get_indexes_version/0]).
 
--export([get_type/0, get_remote_indexes/1, get_local_status/0, restart/0, get_status_mapping/0,
+-export([get_type/0, get_remote_indexes/1, get_local_status/0, restart/0,
          get_gauges/0, get_counters/0, get_computed/0, grab_stats/0, prefix/0,
          per_index_stat/2, global_index_stat/1, compute_gauges/1,
          get_service_gauges/0, service_stat_prefix/0, service_event_name/0,
-         compute_service_gauges/1, get_service_counters/0]).
+         compute_service_gauges/1, get_service_counters/0,
+         process_status/1, process_status/2]).
 
 get_status(Timeout) ->
     index_status_keeper:get_status(?MODULE, Timeout).
@@ -52,7 +54,7 @@ get_local_status() ->
 restart() ->
     ns_ports_setup:restart_port_by_name(indexer).
 
-get_status_mapping() ->
+status_mapping() ->
     AddType = case cluster_compat_mode:is_cluster_45() of
                   true ->
                       [{storageMode, <<"indexType">>}];
@@ -66,6 +68,40 @@ get_status_mapping() ->
      {definition, <<"definition">>},
      {progress, <<"completion">>},
      {hosts, <<"hosts">>} | AddType].
+
+process_status(Status) ->
+    process_status(Status, status_mapping()).
+
+process_status(Status, Mapping) ->
+    case lists:keyfind(<<"code">>, 1, Status) of
+        {_, <<"success">>} ->
+            RawIndexes =
+                case lists:keyfind(<<"status">>, 1, Status) of
+                    false ->
+                        [];
+                    {_, V} ->
+                        V
+                end,
+
+            {ok, process_indexes(RawIndexes, Mapping)};
+        _ ->
+            ?log_error("Indexer returned unsuccessful status:~n~p", [Status]),
+            {error, bad_status}
+    end.
+
+process_indexes(Indexes, Mapping) ->
+    lists:map(
+      fun ({Index}) ->
+              lists:foldl(fun ({Key, BinKey}, Acc) when is_atom(Key) ->
+                                  {_, Val} = lists:keyfind(BinKey, 1, Index),
+                                  [{Key, Val} | Acc];
+                              ({ListOfKeys, BinKey}, Acc) when is_list(ListOfKeys) ->
+                                  {_, Val} = lists:keyfind(BinKey, 1, Index),
+                                  lists:foldl(fun (Key, Acc1) ->
+                                                      [{Key, Val} | Acc1]
+                                              end, Acc, ListOfKeys)
+                          end, [], Mapping)
+      end, Indexes).
 
 start_keeper() ->
     index_status_keeper:start_link(?MODULE).

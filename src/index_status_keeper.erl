@@ -180,7 +180,7 @@ grab_status(#state{indexer = Indexer,
                    source = local}) ->
     case Indexer:get_local_status() of
         {ok, {[_|_] = Status}} ->
-            process_status(Indexer, Status);
+            Indexer:process_status(Status);
         {ok, Other} ->
             ?log_error("Got invalid status from the ~p:~n~p", [Indexer, Other]),
             {error, bad_status};
@@ -219,38 +219,6 @@ grab_status(#state{indexer = Indexer,
                     {error, failed}
             end
     end.
-
-process_status(Indexer, Status) ->
-    case lists:keyfind(<<"code">>, 1, Status) of
-        {_, <<"success">>} ->
-            RawIndexes =
-                case lists:keyfind(<<"status">>, 1, Status) of
-                    false ->
-                        [];
-                    {_, V} ->
-                        V
-                end,
-
-            {ok, process_indexes(Indexer, RawIndexes)};
-        _ ->
-            ?log_error("Indexer returned unsuccessful status:~n~p", [Status]),
-            {error, bad_status}
-    end.
-
-process_indexes(Indexer, Indexes) ->
-    KeysMappingAtomToBin = Indexer:get_status_mapping(),
-    lists:map(
-      fun ({Index}) ->
-              lists:foldl(fun ({Key, BinKey}, Acc) when is_atom(Key) ->
-                                  {_, Val} = lists:keyfind(BinKey, 1, Index),
-                                  [{Key, Val} | Acc];
-                              ({ListOfKeys, BinKey}, Acc) when is_list(ListOfKeys) ->
-                                  {_, Val} = lists:keyfind(BinKey, 1, Index),
-                                  lists:foldl(fun (Key, Acc1) ->
-                                                      [{Key, Val} | Acc1]
-                                              end, Acc, ListOfKeys)
-                          end, [], KeysMappingAtomToBin)
-      end, Indexes).
 
 get_source(Indexer) ->
     Config = ns_config:get(),
