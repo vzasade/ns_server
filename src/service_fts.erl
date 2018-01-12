@@ -13,7 +13,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
--module(indexer_fts).
+-module(service_fts).
 
 -export([start_keeper/0, get_indexes/0]).
 
@@ -50,7 +50,7 @@ status_mapping() ->
      {hosts, <<"hosts">>}].
 
 process_status(Status) ->
-    indexer_gsi:process_status(Status, status_mapping()).
+    service_index:process_status(Status, status_mapping()).
 
 start_keeper() ->
     index_status_keeper:start_link(?MODULE).

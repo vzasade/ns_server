@@ -13,7 +13,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
--module(indexer_cbas).
+-module(service_cbas).
 
 -include("ns_common.hrl").
 
