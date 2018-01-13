@@ -214,8 +214,7 @@ do_build_pool_info(Id, CanIncludeOtpCookie, InfoLevel, Stability, LocalAddr) ->
       ]}}
     ]},
 
-    TasksURI = bin_concat_path(["pools", Id, "tasks"],
-                                             [{"v", ns_doctor:get_tasks_version()}]),
+    TasksURI = bin_concat_path(["pools", Id, "tasks"], [{"v", ns_doctor:get_tasks_version()}]),
 
     {ok, IndexesVersion0} = service_index:get_indexes_version(),
     IndexesVersion = list_to_binary(integer_to_list(IndexesVersion0)),
