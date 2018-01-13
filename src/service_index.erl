@@ -28,13 +28,13 @@
          process_status/1, process_status/2]).
 
 get_status(Timeout) ->
-    index_status_keeper:get_status(?MODULE, Timeout).
+    service_status_keeper:get_status(?MODULE, Timeout).
 
 get_indexes() ->
-    index_status_keeper:get_indexes(?MODULE).
+    service_status_keeper:get_indexes(?MODULE).
 
 get_indexes_version() ->
-    index_status_keeper:get_indexes_version(?MODULE).
+    service_status_keeper:get_indexes_version(?MODULE).
 
 get_type() ->
     index.
@@ -104,7 +104,7 @@ process_indexes(Indexes, Mapping) ->
       end, Indexes).
 
 start_keeper() ->
-    index_status_keeper:start_link(?MODULE).
+    service_status_keeper:start_link(?MODULE).
 
 get_gauges() ->
     [disk_size, data_size, num_docs_pending, num_docs_queued,
