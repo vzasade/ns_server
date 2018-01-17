@@ -118,7 +118,7 @@ do_recognize_name(Service, K) ->
     end.
 
 do_recognize_bucket_metric(Service, K) ->
-    case binary:split(K, <<":">>, [global]) of
+    case Service:split_stat_name(K) of
         [Bucket, Item, Metric] ->
             Type = find_type(Metric, [{#stats_accumulators.gauges, Service:get_gauges()},
                                       {#stats_accumulators.counters, Service:get_counters()}]),
