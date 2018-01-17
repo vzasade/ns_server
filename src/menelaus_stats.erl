@@ -2787,7 +2787,8 @@ output_ui_stats(Req, Stats, Directory, Wnd, Bucket, StatName, NewHaveStamp, Extr
 get_indexes(Service, BucketId) ->
     simple_memoize({indexes, Service:get_type(), BucketId},
                    fun () ->
-                           Nodes = section_nodes(Service:prefix() ++ BucketId),
+                           Nodes = section_nodes(service_stats_collector:service_prefix(Service)
+                                                 ++ BucketId),
                            do_get_indexes(Service, BucketId, Nodes)
                    end, 5000).
 
