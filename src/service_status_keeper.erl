@@ -103,7 +103,7 @@ handle_cast({update, Status}, #state{source = local} = State) ->
 handle_cast({update, _}, State) ->
     ?log_warning("Got unexpected status update when source is not local. Ignoring."),
     {noreply, State};
-handle_cast({refresh_done, Result}, State) ->
+handle_cast({refresh_done, Result}, #state{service = Service} = State) ->
     NewState =
         case Result of
             {ok, Items} ->
@@ -111,6 +111,7 @@ handle_cast({refresh_done, Result}, State) ->
             {stale, Items} ->
                 set_stale(Items, State);
             {error, _} ->
+                ?log_error("Service ~p returned incorrect status", [Service]),
                 increment_stale(State)
         end,
 
@@ -178,11 +179,8 @@ refresh_status(State) ->
 grab_status(#state{service = Service,
                    source = local}) ->
     case Service:get_local_status() of
-        {ok, {[_|_] = Status}} ->
+        {ok, Status} ->
             Service:process_status(Status);
-        {ok, Other} ->
-            ?log_error("Got invalid status from the ~p:~n~p", [Service, Other]),
-            {error, bad_status};
         Error ->
             Error
     end;

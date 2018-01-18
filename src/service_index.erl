@@ -70,7 +70,7 @@ status_mapping() ->
 process_status(Status) ->
     process_status(Status, status_mapping()).
 
-process_status(Status, Mapping) ->
+process_status({[_|_] = Status}, Mapping) ->
     case lists:keyfind(<<"code">>, 1, Status) of
         {_, <<"success">>} ->
             RawIndexes =
@@ -85,7 +85,10 @@ process_status(Status, Mapping) ->
         _ ->
             ?log_error("Indexer returned unsuccessful status:~n~p", [Status]),
             {error, bad_status}
-    end.
+    end;
+process_status(Other, _Mapping) ->
+    ?log_error("Got invalid status: ~p", [Other]),
+    {error, bad_status}.
 
 process_indexes(Indexes, Mapping) ->
     lists:map(
