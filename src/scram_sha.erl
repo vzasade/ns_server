@@ -66,10 +66,6 @@ encode_with_sid(Sid, Message) ->
 reply_error() ->
     {auth_failure, []}.
 
-reply_error(Sid, Error) ->
-    Hdr =  "I" ++ encode_with_sid(Sid, "e=" ++ Error),
-    {auth_failure, [{meta_header(), Hdr}]}.
-
 reply_success(Sid, Identity, ServerProof) ->
     {ok, Identity,
      [{meta_header(),
@@ -211,14 +207,31 @@ find_auth(Name) ->
 find_auth_info(Sha, Name) ->
     case find_auth(Name) of
         {false, _} ->
-            {error, "unknown-user"};
+            undefined;
         {AuthInfo, Domain} ->
             case proplists:get_value(auth_info_key(Sha), AuthInfo) of
                 undefined ->
-                    {error, "other-error"};
+                    undefined;
                 {Info} ->
                     {Info, Domain}
             end
+    end.
+
+get_salt_and_iterations(Sha, Name) ->
+    case find_auth_info(Sha, Name) of
+        undefined ->
+            {binary_to_list(generate_salt(Sha)), iterations()};
+        {Props, _} ->
+            {binary_to_list(proplists:get_value(<<"s">>, Props)),
+             proplists:get_value(<<"i">>, Props)}
+    end.
+
+get_salted_password_and_domain(Sha, Name) ->
+    case find_auth_info(Sha, Name) of
+        undefined ->
+            {crypto:rand_bytes(crypto:rand_uniform(6, 20)), undefined};
+        {Props, Domain} ->
+            {base64:decode(proplists:get_value(<<"h">>, Props)), Domain}
     end.
 
 -record(memo, {auth_message,
@@ -226,22 +239,15 @@ find_auth_info(Sha, Name) ->
                nonce}).
 
 handle_client_first_message(Sha, Name, Nonce, Bare) ->
-    case find_auth_info(Sha, Name) of
-        {error, _} ->
-            reply_error();
-        {Props, _} ->
-            Salt = binary_to_list(proplists:get_value(<<"s">>, Props)),
-            IterationCount = proplists:get_value(<<"i">>, Props),
-
-            ServerNonce = Nonce ++ gen_nonce(),
-            ServerMessage =
-                server_first_message(ServerNonce, Salt, IterationCount),
-            Memo = #memo{auth_message = Bare ++ "," ++ ServerMessage,
-                         name = Name,
-                         nonce = ServerNonce},
-            Sid = token_server:generate(?MODULE, Memo),
-            reply_first_step(Sha, Sid, ServerMessage)
-    end.
+    {Salt, IterationCount} = get_salt_and_iterations(Sha, Name),
+    ServerNonce = Nonce ++ gen_nonce(),
+    ServerMessage =
+        server_first_message(ServerNonce, Salt, IterationCount),
+    Memo = #memo{auth_message = Bare ++ "," ++ ServerMessage,
+                 name = Name,
+                 nonce = ServerNonce},
+    Sid = token_server:generate(?MODULE, Memo),
+    reply_first_step(Sha, Sid, ServerMessage).
 
 calculate_client_proof(Sha, SaltedPassword, AuthMessage) ->
     ClientKey = crypto:hmac(Sha, SaltedPassword, <<"Client Key">>),
@@ -256,31 +262,21 @@ calculate_server_proof(Sha, SaltedPassword, AuthMessage) ->
 handle_client_final_message(Sha, Sid, Nonce, Proof, ClientFinalMessage) ->
     case token_server:take(?MODULE, Sid) of
         false ->
-            reply_error(Sid, "other-error");
+            reply_error();
         {ok, #memo{auth_message = AuthMessage,
                    name = Name,
                    nonce = ServerNonce}} ->
-            case misc:compare_secure(Nonce, ServerNonce) of
-                false ->
-                    reply_error(Sid, "other-error");
-                true ->
-                    case find_auth_info(Sha, Name) of
-                        {error, Error} ->
-                            reply_error(Sid, Error);
-                        {Props, Domain} ->
-                            SaltedPassword =
-                                base64:decode(proplists:get_value(<<"h">>,
-                                                                  Props)),
-                            FullAuthMessage =
-                                AuthMessage ++ "," ++ ClientFinalMessage,
-                            case handle_proofs(Sha, SaltedPassword,
-                                               Proof, FullAuthMessage) of
-                                error ->
-                                    reply_error(Sid, "invalid-proof");
-                                ServerProof ->
-                                    reply_success(Sid, {Name, Domain}, ServerProof)
-                            end
-                    end
+            {SaltedPassword, Domain} =
+                get_salted_password_and_domain(Sha, Name),
+            FullAuthMessage = AuthMessage ++ "," ++ ClientFinalMessage,
+            ServerProof = handle_proofs(Sha, SaltedPassword, Proof,
+                                        FullAuthMessage),
+            case {misc:compare_secure(Nonce, ServerNonce), Domain,
+                  ServerProof} of
+                {true, D, P} when D =/= undefined, P =/= error ->
+                    reply_success(Sid, {Name, Domain}, ServerProof);
+                _ ->
+                    reply_error()
             end
     end.
 
@@ -305,16 +301,21 @@ pbkdf2_iter(Sha, Password, Salt, Iteration, Prev, Acc) ->
                 Next, crypto:exor(Next, Acc)).
 
 hash_password(Type, Password) ->
-    Iterations = ns_config:read_key_fast(memcached_password_hash_iterations,
-                                         4000),
+    Iterations = iterations(),
+    Salt = generate_salt(Type),
+    Hash = pbkdf2(Type, Password, Salt, Iterations),
+    {Salt, Hash, Iterations}.
+
+generate_salt(Type) ->
     Len = case Type of
               sha -> ?SHA_DIGEST_SIZE;
               sha256 -> ?SHA256_DIGEST_SIZE;
               sha512 -> ?SHA512_DIGEST_SIZE
           end,
-    Salt = crypto:rand_bytes(Len),
-    Hash = pbkdf2(Type, Password, Salt, Iterations),
-    {Salt, Hash, Iterations}.
+    crypto:rand_bytes(Len).
+
+iterations() ->
+    ns_config:read_key_fast(memcached_password_hash_iterations, 4000).
 
 supported_types() ->
     [sha512, sha256, sha].
