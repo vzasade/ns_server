@@ -774,15 +774,13 @@ do_handle_call({apply_new_config, NewBucketConfig}, _From,
 
     SetTopology = cluster_compat_mode:is_cluster_madhatter(),
     %% then we're ok to change vbucket states
-    [begin
-         case SetTopology of
-             true ->
-                 ns_memcached:set_vbucket(BucketName, VBucket, StateToSet,
-                                          Topology);
-             false ->
-                 ns_memcached:set_vbucket(BucketName, VBucket, StateToSet)
-         end
-     end || {VBucket, StateToSet, Topology} <- ToSet],
+    case SetTopology of
+        true ->
+            ns_memcached:set_vbuckets(BucketName, ToSet);
+        false ->
+            ns_memcached:set_vbuckets(BucketName,
+                                      [{V, S, undefined} || {V, S, _} <- ToSet])
+    end,
 
     %% and ok to delete vbuckets we want to delete
     [ns_memcached:delete_vbucket(BucketName, VBucket) || VBucket <- ToDelete],

@@ -43,6 +43,7 @@
          select_bucket/2,
          set_vbucket/3,
          set_vbucket/4,
+         set_vbuckets/2,
          stats/1,
          stats/4,
          get_meta/3,
@@ -379,6 +380,13 @@ set_vbucket(Sock, VBucket, VBucketState) ->
     set_vbucket(Sock, VBucket, VBucketState, undefined).
 
 set_vbucket(Sock, VBucket, VBucketState, VBInfo) ->
+    case cmd(?CMD_SET_VBUCKET, Sock, undefined, undefined,
+             construct_set_vbucket_packet(VBucket, VBucketState, VBInfo)) of
+        {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} -> ok;
+        Response -> process_error_response(Response)
+    end.
+
+construct_set_vbucket_packet(VBucket, VBucketState, VBInfo) ->
     State = encode_vbucket_state(VBucketState),
     Header = #mc_header{vbucket = VBucket},
     Entry = case VBInfo of
@@ -387,9 +395,22 @@ set_vbucket(Sock, VBucket, VBucketState, VBInfo) ->
                                ext = State,
                                datatype = ?MC_DATATYPE_JSON}
             end,
-    case cmd(?CMD_SET_VBUCKET, Sock, undefined, undefined, {Header, Entry}) of
-        {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} -> ok;
-        Response -> process_error_response(Response)
+    {Header, Entry}.
+
+set_vbuckets(Sock, ToSet) ->
+    ToSend = [construct_set_vbucket_packet(VBucket, VBucketState, VBInfo)
+              || {VBucket, VBucketState, VBInfo} <- ToSet],
+    RVs = pipeline_send_recv(Sock, ?CMD_SET_VBUCKET, ToSend),
+    Bad = lists:filtermap(
+            fun ({#mc_header{status = ?SUCCESS}, _}) ->
+                    false;
+                ({#mc_header{vbucket = VBucket} = Header, Entry}) ->
+                    {true, {lists:keyfind(VBucket, 1, ToSet),
+                            process_error_response(Header, Entry)}}
+            end, RVs),
+    case Bad of
+        [] -> ok;
+        _ -> {error, Bad}
     end.
 
 -spec pipeline_send_recv(port(), integer(), [{#mc_header{}, #mc_entry{}}]) ->
@@ -703,10 +724,12 @@ map_status(?SUBDOC_INVALID_XATTR_ORDER) ->
 map_status(_) ->
     unknown.
 
--spec process_error_response(any()) ->
-                                    mc_error().
-process_error_response({ok, #mc_header{status=Status}, #mc_entry{data=Msg},
-                        _NCB}) ->
+-spec process_error_response(any()) -> mc_error().
+process_error_response({ok, Header, Entry, _NCB}) ->
+    process_error_response(Header, Entry).
+
+-spec process_error_response(#mc_header{}, #mc_entry{}) -> mc_error().
+process_error_response(#mc_header{status=Status}, #mc_entry{data=Msg}) ->
     {memcached_error, map_status(Status), Msg}.
 
 wait_for_seqno_persistence(Sock, VBucket, SeqNo) ->
