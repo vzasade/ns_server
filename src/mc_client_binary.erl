@@ -67,6 +67,7 @@
          subdoc_multi_lookup/5,
          get_failover_log/2,
          update_user_permissions/2,
+         pipeline_send_recv/3,
          set_collections_manifest/2,
          get_collections_manifest/1
         ]).
@@ -390,6 +391,27 @@ set_vbucket(Sock, VBucket, VBucketState, VBInfo) ->
         {ok, #mc_header{status=?SUCCESS}, _ME, _NCB} -> ok;
         Response -> process_error_response(Response)
     end.
+
+-spec pipeline_send_recv(port(), integer(), [{#mc_header{}, #mc_entry{}}]) ->
+    [{#mc_header{}, #mc_entry{}}].
+pipeline_send_recv(Sock, Opcode, Requests) ->
+    EncodedStream = lists:flatmap(
+                      fun ({Header, Entry}) ->
+                              NewHeader = Header#mc_header{opcode = Opcode},
+                              NewEntry = ext(Opcode, Entry),
+                              mc_binary:encode(req, NewHeader, NewEntry)
+                      end, Requests),
+    ok = mc_binary:send(Sock, EncodedStream),
+    TRef = make_ref(),
+    {RV, <<>>} = lists:foldl(
+                   fun (_, {Acc, Rest}) ->
+                           {ok, Header, Entry, Extra} = mc_binary:quick_active_recv(
+                                                          Sock, Rest, TRef),
+                           %% Assert we receive the same opcode.
+                           Opcode = Header#mc_header.opcode,
+                           {Acc ++ [{Header, Entry}], Extra}
+                   end, {[], <<>>}, Requests),
+    RV.
 
 compact_vbucket(Sock, VBucket, PurgeBeforeTS, PurgeBeforeSeqNo, DropDeletes) ->
     DD = case DropDeletes of
