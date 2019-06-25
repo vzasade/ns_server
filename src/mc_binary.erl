@@ -29,7 +29,7 @@
 
 %% Functions to work with memcached binary protocol packets.
 
-recv_with_data(Sock, Len, TimeoutRef, Data) ->
+recv_with_active_socket(Sock, Len, TimeoutRef, Data) ->
     DataSize = erlang:size(Data),
     case DataSize >= Len of
         true ->
@@ -40,7 +40,8 @@ recv_with_data(Sock, Len, TimeoutRef, Data) ->
             ok = inet:setopts(Sock, [{active, once}]),
             receive
                 {tcp, Sock, NewData} ->
-                    recv_with_data(Sock, Len, TimeoutRef, <<Data/binary, NewData/binary>>);
+                    recv_with_active_socket(Sock, Len, TimeoutRef,
+                                            <<Data/binary, NewData/binary>>);
                 {tcp_closed, Sock} ->
                     throw({error, closed});
                 TimeoutRef ->
@@ -49,7 +50,8 @@ recv_with_data(Sock, Len, TimeoutRef, Data) ->
     end.
 
 quick_active_recv(Sock, Data, TimeoutRef) ->
-    {ok, Hdr, Rest} = recv_with_data(Sock, ?HEADER_LEN, TimeoutRef, Data),
+    {ok, Hdr, Rest} = recv_with_active_socket(Sock, ?HEADER_LEN, TimeoutRef,
+                                              Data),
     {Header, Entry} = decode_header(res, Hdr),
     #mc_header{extlen = ExtLen,
                keylen = KeyLen,
@@ -57,10 +59,13 @@ quick_active_recv(Sock, Data, TimeoutRef) ->
     case BodyLen > 0 of
         true ->
             true = BodyLen >= (ExtLen + KeyLen),
-            {ok, Ext, Rest2} = recv_with_data(Sock, ExtLen, TimeoutRef, Rest),
-            {ok, Key, Rest3} = recv_with_data(Sock, KeyLen, TimeoutRef, Rest2),
+            {ok, Ext, Rest2} = recv_with_active_socket(Sock, ExtLen,
+                                                       TimeoutRef, Rest),
+            {ok, Key, Rest3} = recv_with_active_socket(Sock, KeyLen,
+                                                       TimeoutRef, Rest2),
             RealBodyLen = erlang:max(0, BodyLen - (ExtLen + KeyLen)),
-            {ok, BodyData, Rest4} = recv_with_data(Sock, RealBodyLen, TimeoutRef, Rest3),
+            {ok, BodyData, Rest4} = recv_with_active_socket(Sock, RealBodyLen,
+                                                            TimeoutRef, Rest3),
             {ok, Header, Entry#mc_entry{ext = Ext, key = Key, data = BodyData}, Rest4};
         false ->
             {ok, Header, Entry, Rest}
