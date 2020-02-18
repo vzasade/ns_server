@@ -939,6 +939,8 @@ validate_role(Role, Params, Definitions, AllValues) ->
             false
     end.
 
+-spec validate_roles([rbac_role()], ns_config()) ->
+                            {[rbac_role()], [rbac_role()]}.
 validate_roles(Roles, Config) ->
     Definitions = pipes:run(pipes:stream_list(get_definitions(Config)),
                             visible_roles_filter(),
