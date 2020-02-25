@@ -1101,4 +1101,62 @@ validate_role_test() ->
     ?assertEqual(false, ValidateRole({admin, ["test"]})),
     ?assertEqual(false, ValidateRole(bucket_admin)),
     ?assertEqual(false, ValidateRole({bucket_admin, ["test", "test"]})).
+
+produce_roles_by_permission_test_() ->
+    Config = [[{buckets, [{configs, toy_buckets()}]}]],
+    GetRoles =
+        fun (Permission) ->
+                proplists:get_keys(
+                  pipes:run(produce_roles_by_permission(Permission, Config),
+                            pipes:collect()))
+        end,
+    Test =
+        fun (Roles, Permission) ->
+                fun () ->
+                        ?assertEqual(lists:sort(Roles),
+                                     lists:sort(GetRoles(Permission)))
+                end
+        end,
+    {foreach,
+     fun() ->
+             meck:new(cluster_compat_mode, [passthrough]),
+             meck:expect(cluster_compat_mode, is_enterprise,
+                         fun () -> true end),
+             meck:expect(cluster_compat_mode, is_cluster_55,
+                         fun (_) -> true end)
+     end,
+     fun (_) ->
+             meck:unload(cluster_compat_mode)
+     end,
+     [{"security permission",
+       Test([admin, ro_admin, security_admin], {[admin, security], any})},
+      {"pools read",
+       fun () ->
+               Roles = GetRoles({[pools], read}),
+               ?assertEqual([],
+                            [admin, analytics_reader, {data_reader, [any]},
+                             {data_reader, [{"test",<<"test_id">>}]}] -- Roles)
+       end},
+      {"xattr write",
+       Test([admin,
+             {bucket_full_access, [any]},
+             {bucket_full_access, [{"test", <<"test_id">>}]},
+             {data_backup, [any]},
+             {data_backup, [{"test", <<"test_id">>}]}],
+            {[{bucket, "test"}, data, xattr], [write]})},
+      {"any bucket",
+       Test([admin,
+             {bucket_full_access, [any]},
+             {bucket_full_access, [{"test", <<"test_id">>}]},
+             {bucket_full_access, [{"default", <<"default_id">>}]},
+             {data_backup, [any]},
+             {data_backup, [{"test", <<"test_id">>}]},
+             {data_backup, [{"default", <<"default_id">>}]}],
+            {[{bucket, any}, data, xattr], [write]})},
+      {"wrong bucket",
+       Test([admin,
+             {bucket_full_access, [any]},
+             {data_backup, [any]}],
+            {[{bucket, "wrong"}, data, xattr], [write]})}]}.
+
 -endif.
