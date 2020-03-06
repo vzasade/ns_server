@@ -700,8 +700,7 @@ compile_roles(_Roles, undefined, _Buckets) ->
 compile_roles(Roles, Definitions, Buckets) ->
     compile_roles(
       fun (_Name, Params, ParamDefs, Permissions) ->
-              substitute_params(strip_ids(ParamDefs, Params),
-                                ParamDefs, Permissions)
+              substitute_params(strip_ids(Params), ParamDefs, Permissions)
       end, Roles, Definitions, Buckets).
 
 -spec get_roles(rbac_identity()) -> [rbac_role()].
@@ -888,14 +887,12 @@ produce_roles_by_permission(Permission, Config) ->
        expand_params(AllValues),
        filter_by_permission(Permission, Buckets, Definitions)]).
 
-strip_id(bucket_name, {P, _Id}) ->
-    P;
-strip_id(bucket_name, P) ->
-    P.
-
-strip_ids(ParamDefs, Params) ->
-    [strip_id(ParamDef, Param) || {ParamDef, Param} <-
-                                      lists:zip(ParamDefs, Params)].
+strip_ids(Params) ->
+    lists:map(fun ({P, _Id}) ->
+                      P;
+                  (P) ->
+                      P
+              end, Params).
 
 -spec validate_role(rbac_role(), [rbac_role_def()], list()) ->
                            false | {ok, rbac_role()}.
