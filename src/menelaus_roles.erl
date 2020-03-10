@@ -547,7 +547,6 @@ roles_55() ->
        {[ui], [read]},
        {[pools], [read]}]}].
 
--ifdef(TEST).
 update_roles([{Name, _, _, _} = Role | NewRoles],
              [{Name, _, _, _} | OldRoles], Acc) ->
     update_roles(NewRoles, OldRoles, [Role | Acc]);
@@ -568,7 +567,6 @@ roles_cheshirecat() ->
          {[{bucket, bucket_name}, settings], [read]},
          {[pools], [read]}]}],
       roles_55(), []).
--endif.
 
 -spec get_definitions() -> [rbac_role_def(), ...].
 get_definitions() ->
@@ -576,11 +574,16 @@ get_definitions() ->
 
 -spec get_definitions(ns_config()) -> [rbac_role_def(), ...].
 get_definitions(Config) ->
-    case cluster_compat_mode:is_cluster_55(Config) of
+    case cluster_compat_mode:is_cluster_cheshirecat(Config) of
         true ->
-            roles_55();
+            roles_cheshirecat();
         false ->
-            roles_50()
+            case cluster_compat_mode:is_cluster_55(Config) of
+                true ->
+                    roles_55();
+                false ->
+                    roles_50()
+            end
     end.
 
 -spec object_match(
@@ -892,31 +895,50 @@ filter_out_invalid_roles(Roles, Definitions, Buckets) ->
                           {Name, Params}
                   end, Roles, Definitions, Buckets).
 
-get_applicable_buckets(Buckets, {[{bucket, Bucket} | _], _})
+get_non_wildcard_params(Buckets, {[{bucket, Bucket} | _], _})
   when Bucket =/= any ->
     case ns_bucket:get_bucket_from_configs(Bucket, Buckets) of
         {ok, Props} ->
-            [{Bucket, Props}];
+            [{bucket_name, {Bucket, ns_bucket:bucket_uuid(Props)}}];
         not_present ->
             []
     end;
-get_applicable_buckets(Buckets, _) ->
-    Buckets.
+get_non_wildcard_params(_Buckets, _Permission) ->
+    [].
 
-calculate_possible_param_values(_Buckets, [], _) ->
-    [[]];
-calculate_possible_param_values(Buckets, [bucket_name], Permission) ->
-    [[any] | [[{Name, ns_bucket:bucket_uuid(Props)}] ||
-                 {Name, Props} <- get_applicable_buckets(Buckets, Permission)]].
+expand_with_wildcards(Combination, NonWildcards) ->
+    expand_with_wildcards(length(Combination), [], 0, Combination,
+                      NonWildcards, [[any || _ <- Combination]]).
+
+pad_list(_Value, 0, List) ->
+    List;
+pad_list(Value, Count, List) ->
+    pad_list(Value, Count - 1, [Value | List]).
+
+expand_with_wildcards(_Len, _Prefix, _PrefixLen, [], _NonWildcards, Acc) ->
+    Acc;
+expand_with_wildcards(Len, Prefix, PrefixLen, [Name | Rest],
+                      NonWildcards, Acc) ->
+    case proplists:get_value(Name, NonWildcards) of
+        undefined ->
+            Acc;
+        Value ->
+            NewPrefix = [Value | Prefix],
+            NewAcc =
+                [lists:reverse(pad_list(any, Len - PrefixLen -1, NewPrefix)) |
+                 Acc],
+            expand_with_wildcards(Len, NewPrefix, PrefixLen + 1, Rest,
+                                  NonWildcards, NewAcc)
+    end.
 
 all_params_combinations() ->
-    [[], [bucket_name]].
+    [[], [bucket_name], [bucket_name, scope_name, collection_name]].
 
 -spec calculate_possible_param_values(list(), undefined | rbac_permission()) ->
                                              rbac_all_param_values().
 calculate_possible_param_values(Buckets, Permission) ->
-    [{Combination,
-      calculate_possible_param_values(Buckets, Combination, Permission)} ||
+    NonWildcards = get_non_wildcard_params(Buckets, Permission),
+    [{Combination, expand_with_wildcards(Combination, NonWildcards)} ||
         Combination <- all_params_combinations()].
 
 -spec get_possible_param_values([atom()], rbac_all_param_values()) ->
@@ -1291,7 +1313,7 @@ produce_roles_by_permission_test_() ->
              meck:new(cluster_compat_mode, [passthrough]),
              meck:expect(cluster_compat_mode, is_enterprise,
                          fun () -> true end),
-             meck:expect(cluster_compat_mode, is_cluster_55,
+             meck:expect(cluster_compat_mode, is_cluster_cheshirecat,
                          fun (_) -> true end)
      end,
      fun (_) ->
@@ -1302,9 +1324,9 @@ produce_roles_by_permission_test_() ->
       {"pools read",
        fun () ->
                Roles = GetRoles({[pools], read}),
-               ?assertEqual([],
-                            [admin, analytics_reader, {data_reader, [any]},
-                             {data_reader, [{"test",<<"test_id">>}]}] -- Roles)
+               ?assertEqual(
+                  [], [admin, analytics_reader,
+                       {data_reader, [any, any, any]}] -- Roles)
        end},
       {"xattr write",
        Test([admin,
@@ -1316,11 +1338,7 @@ produce_roles_by_permission_test_() ->
       {"any bucket",
        Test([admin,
              {bucket_full_access, [any]},
-             {bucket_full_access, [{"test", <<"test_id">>}]},
-             {bucket_full_access, [{"default", <<"default_id">>}]},
-             {data_backup, [any]},
-             {data_backup, [{"test", <<"test_id">>}]},
-             {data_backup, [{"default", <<"default_id">>}]}],
+             {data_backup, [any]}],
             {[{bucket, any}, data, xattr], [write]})},
       {"wrong bucket",
        Test([admin,
