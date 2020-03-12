@@ -979,10 +979,15 @@ compile_roles(Roles, Definitions) ->
     compile_roles(Roles, Definitions, toy_buckets()).
 
 compile_roles_test() ->
+    Definitions = [{test_role, [bucket_name], [],
+                    [{[{bucket, bucket_name}], none}]}],
     ?assertEqual([[{[{bucket, "test"}], none}]],
-                 compile_roles([{test_role, ["test"]}],
-                               [{test_role, [bucket_name], [],
-                                 [{[{bucket, bucket_name}], none}]}])).
+                 compile_roles([{test_role, ["test"]}], Definitions)),
+    ?assertEqual([[{[{bucket, "test"}], none}]],
+                 compile_roles([{test_role, [{"test", <<"test_id">>}]}],
+                               Definitions)),
+    ?assertEqual([], compile_roles([{test_role, [{"test", <<"wrong_id">>}]}],
+                                   Definitions)).
 
 admin_test() ->
     Roles = compile_roles([admin], roles_50()),
