@@ -64,7 +64,8 @@
          filter_out_invalid_roles/3,
          produce_roles_by_permission/2,
          get_security_roles/1,
-         external_auth_polling_interval/0]).
+         external_auth_polling_interval/0,
+         strip_ids/1]).
 
 -export([start_compiled_roles_cache/0]).
 

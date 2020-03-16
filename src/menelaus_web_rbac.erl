@@ -705,15 +705,20 @@ parse_roles(undefined) ->
 parse_roles(RolesStr) ->
     RolesRaw = string:tokens(RolesStr, ","),
     [parse_role(string:trim(RoleRaw)) || RoleRaw <- RolesRaw].
+params_to_string([any]) ->
+    "*";
+params_to_string([any | Rest]) ->
+    params_to_string(Rest);
+params_to_string(Params) ->
+    lists:flatten(
+      lists:join(":", menelaus_roles:strip_ids(lists:reverse(Params)))).
 
 role_to_string(Role) when is_atom(Role) ->
     atom_to_list(Role);
-role_to_string({Role, [any]}) ->
-    lists:flatten(io_lib:format("~p[*]", [Role]));
-role_to_string({Role, [{BucketName, _}]}) ->
-    role_to_string({Role, [BucketName]});
-role_to_string({Role, [BucketName]}) ->
-    lists:flatten(io_lib:format("~p[~s]", [Role, BucketName])).
+role_to_string({Role, Params}) ->
+    lists:flatten(io_lib:format(
+                    "~p[~s]",
+                    [Role, params_to_string(lists:reverse(Params))])).
 
 known_domains() ->
     ["local", "external"].
@@ -1607,14 +1612,13 @@ handle_put_profile(RawIdentity, Req) ->
     end.
 
 -ifdef(TEST).
-parse_roles_test() ->
-    Res = parse_roles("admin, bucket_admin[test.test], bucket_admin[*], "
-                      "no_such_atom, bucket_admin[default"),
-    ?assertMatch([admin,
-                  {bucket_admin, ["test.test"]},
-                  {bucket_admin, [any]},
-                  {error, "no_such_atom"},
-                  {error, "bucket_admin[default"}], Res).
+role_to_string_test() ->
+    ?assertEqual("role", role_to_string(role)),
+    ?assertEqual("role[b]", role_to_string({role, ["b"]})),
+    ?assertEqual("role[*]", role_to_string({role, [any]})),
+    ?assertEqual("role[b:s:c]", role_to_string({role, ["b", "s", "c"]})),
+    ?assertEqual("role[b:s]", role_to_string({role, ["b", "s", any]})),
+    ?assertEqual("role[b]", role_to_string({role, ["b", any, any]})).
 
 parse_permissions_test() ->
     ?assertMatch(
