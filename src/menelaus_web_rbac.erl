@@ -149,16 +149,25 @@ handle_saslauthd_auth_settings_post(Req) ->
             menelaus_util:reply_json(Req, {Errors}, 400)
     end.
 
+jsonify_param({bucket_name, any}) ->
+    {true, {bucket_name, <<"*">>}};
+jsonify_param({bucket_name, BucketName}) ->
+    {true, {bucket_name, list_to_binary(BucketName)}};
+jsonify_param({Atom, any}) when Atom =:= scope_name;
+                                Atom =:= collection_name ->
+    false;
+jsonify_param({Atom, Name}) when Atom =:= scope_name;
+                                 Atom =:= collection_name ->
+    {true, {Atom, list_to_binary(Name)}}.
+
 role_to_json(Name) when is_atom(Name) ->
     [{role, Name}];
-role_to_json({Name, [any]}) ->
-    [{role, Name}, {bucket_name, <<"*">>}];
-role_to_json({Name, [{BucketName, _Id}]}) ->
-    [{role, Name}, {bucket_name, list_to_binary(BucketName)}];
-role_to_json({Name, [BucketName]}) ->
-    [{role, Name}, {bucket_name, list_to_binary(BucketName)}];
-role_to_json({Name, [BucketName, any, any]}) ->
-    role_to_json({Name, [BucketName]}).
+role_to_json({Name, Params}) ->
+    Definitions = menelaus_roles:get_definitions(),
+    [{role, Name} |
+     lists:filtermap(fun jsonify_param/1,
+                     lists:zip(menelaus_roles:get_param_defs(Name, Definitions),
+                               menelaus_roles:strip_ids(Params)))].
 
 role_to_json(Role, Origins) ->
     role_to_json(Role) ++
@@ -1620,6 +1629,44 @@ role_to_string_test() ->
     ?assertEqual("role[b:s]", role_to_string({role, ["b", "s", any]})),
     ?assertEqual("role[b]", role_to_string({role, ["b", any, any]})).
 
+t_wrap(Tests) ->
+    {foreach,
+     fun() ->
+             meck:new(cluster_compat_mode, [passthrough]),
+             meck:expect(cluster_compat_mode, is_enterprise,
+                         fun () -> true end),
+             meck:expect(cluster_compat_mode, is_cluster_cheshirecat,
+                         fun (_) -> true end)
+     end,
+     fun (_) ->
+             meck:unload(cluster_compat_mode)
+     end,
+     Tests}.
+
+role_to_json_test_() ->
+    Test = fun (Expected, Role) ->
+                   ?assertEqual(lists:sort(Expected),
+                                lists:sort(role_to_json(Role)))
+           end,
+    t_wrap(
+      [{"role to json",
+        fun () ->
+                Test([{role, admin}], admin),
+                Test([{role, bucket_admin}, {bucket_name, <<"*">>}],
+                     {bucket_admin, [any]}),
+                Test([{role, bucket_admin}, {bucket_name, <<"test">>}],
+                     {bucket_admin, ["test"]}),
+                Test([{role, data_reader}, {bucket_name, <<"*">>}],
+                     {data_reader, [any, any, any]}),
+                Test([{role, data_reader}, {bucket_name, <<"test">>}],
+                     {data_reader, ["test", any, any]}),
+                Test([{role, data_reader}, {bucket_name, <<"test">>},
+                      {scope_name, <<"s">>}],
+                     {data_reader, ["test", "s", any]}),
+                Test([{role, data_reader}, {bucket_name, <<"test">>},
+                      {scope_name, <<"s">>}, {collection_name, <<"c">>}],
+                     {data_reader, ["test", "s", "c"]})
+        end}]).
 parse_permissions_test() ->
     ?assertMatch(
        [{"cluster.admin!write", {[admin], write}},
