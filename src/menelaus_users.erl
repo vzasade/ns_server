@@ -73,9 +73,9 @@
          user_auth_info/2,
 
 %% Backward compatibility:
-         upgrade_to_55/2,
-         config_upgrade_to_55/0,
-         upgrade_status/0
+         upgrade/3,
+         config_upgrade/1,
+         upgrade_in_progress/0
         ]).
 
 %% callbacks for replicated_dets
@@ -736,18 +736,15 @@ build_plain_auth(Salt, Mac) ->
     SaltAndMac = <<Salt/binary, Mac/binary>>,
     [{<<"plain">>, base64:encode(SaltAndMac)}].
 
-rbac_55_upgrade_key() ->
-    {rbac_upgrade, ?VERSION_55}.
+rbac_upgrade_key(Version) ->
+    {rbac_upgrade, Version}.
 
-config_upgrade_to_55() ->
-    [{delete, rbac_55_upgrade_key()}].
+config_upgrade(Version) ->
+    [{delete, rbac_upgrade_key(Version)}].
 
-upgrade_status() ->
-    RolesUpgrade = ns_config:read_key_fast(rbac_55_upgrade_key(), undefined),
-    case RolesUpgrade of
-        undefined -> no_upgrade;
-        started -> upgrade_in_progress
-    end.
+upgrade_in_progress() ->
+    lists:any(?cut(ns_config:search(rbac_upgrade_key(_)) =:= {value, started}),
+              upgrades()).
 
 filter_out_invalid_roles(Props, Definitions, Buckets) ->
     Roles = proplists:get_value(roles, Props, []),
@@ -783,15 +780,16 @@ cleanup_bucket_roles(BucketName) ->
             ok
     end.
 
-upgrade_to_55(Config, Nodes) ->
+upgrade(Version, Config, Nodes) ->
     try
-        case ns_config:search(Config, rbac_55_upgrade_key()) of
+        Key = rbac_upgrade_key(Version),
+        case ns_config:search(Config, Key) of
             false ->
-                ns_config:set(rbac_55_upgrade_key(), started);
+                ns_config:set(Key, started);
             {value, started} ->
                 ?log_debug("Found unfinished roles upgrade. Continue.")
         end,
-        do_upgrade_to_55(Nodes),
+        do_upgrade(Version, Nodes),
         ok
     catch T:E ->
               ale:error(?USER_LOGGER, "Unsuccessful user storage upgrade.~n~p",
@@ -799,8 +797,11 @@ upgrade_to_55(Config, Nodes) ->
               error
     end.
 
-upgrade_roles_to_55(OldRoles) ->
-    lists:flatmap(fun maybe_upgrade_role_to_55/1, OldRoles).
+upgrades() ->
+    [?VERSION_55].
+
+maybe_upgrade_role(?VERSION_55, Role) ->
+    maybe_upgrade_role_to_55(Role).
 
 maybe_upgrade_role_to_55(cluster_admin) ->
     [cluster_admin, {bucket_full_access, [any]}];
@@ -809,32 +810,33 @@ maybe_upgrade_role_to_55({bucket_admin, Buckets}) ->
 maybe_upgrade_role_to_55(Role) ->
     [Role].
 
-upgrade_user_roles_to_55(Props) ->
+upgrade_user_roles(Version, Props) ->
     OldRoles = proplists:get_value(user_roles, Props),
     %% Convert roles and remove duplicates.
-    NewRoles = lists:usort(upgrade_roles_to_55(OldRoles)),
+    NewRoles = lists:usort(
+                 lists:flatmap(maybe_upgrade_role(Version, _), OldRoles)),
     [{roles, NewRoles} | lists:keydelete(roles, 1, Props)].
 
-user_roles_require_upgrade({{user, _Identity}, Props}) ->
+user_roles_require_upgrade(Version, {{user, _Identity}, Props}) ->
     Roles = proplists:get_value(user_roles, Props),
-    lists:any(?cut(maybe_upgrade_role_to_55(_1) =/= [_1]), Roles).
+    lists:any(?cut(maybe_upgrade_role(Version, _1) =/= [_1]), Roles).
 
-fetch_users_for_55_upgrade() ->
+fetch_users_for_upgrade(Version) ->
     pipes:run(menelaus_users:select_users({'_', '_'}, [user_roles]),
-              [pipes:filter(fun user_roles_require_upgrade/1),
+              [pipes:filter(user_roles_require_upgrade(Version, _)),
                pipes:map(fun ({{user, I}, _}) -> I end)],
               pipes:collect()).
 
-do_upgrade_to_55(Nodes) ->
-    %% propagate rbac_55_upgrade_key to nodes
+do_upgrade(Version, Nodes) ->
+    %% propagate upgrade key to nodes
     ok = ns_config_rep:ensure_config_seen_by_nodes(Nodes),
 
     replicated_storage:sync_to_me(
-      storage_name(), Nodes, ?get_timeout(rbac_55_upgrade_key(), 60000)),
+      storage_name(), Nodes, ?get_timeout(rbac_upgrade_key(Version), 60000)),
 
-    UpdateUsers = fetch_users_for_55_upgrade(),
+    UpdateUsers = fetch_users_for_upgrade(Version),
     lists:foreach(fun (Identity) ->
                           OldProps = get_user_props_raw(Identity),
-                          NewProps = upgrade_user_roles_to_55(OldProps),
+                          NewProps = upgrade_user_roles(Version, OldProps),
                           store_user_validated(Identity, NewProps, same)
                   end, UpdateUsers).
