@@ -801,13 +801,23 @@ upgrades() ->
     [?VERSION_55].
 
 maybe_upgrade_role(?VERSION_55, Role) ->
-    maybe_upgrade_role_to_55(Role).
+    maybe_upgrade_role_to_55(Role);
+maybe_upgrade_role(?VERSION_CHESHIRECAT, Role) ->
+    maybe_upgrade_role_to_cheshire_cat(Role).
 
 maybe_upgrade_role_to_55(cluster_admin) ->
     [cluster_admin, {bucket_full_access, [any]}];
 maybe_upgrade_role_to_55({bucket_admin, Buckets}) ->
     [{bucket_admin, Buckets}, {bucket_full_access, Buckets}];
 maybe_upgrade_role_to_55(Role) ->
+    [Role].
+
+maybe_upgrade_role_to_cheshire_cat({RoleName, Buckets}) ->
+    Length = length(menelaus_roles:get_param_defs(
+                      RoleName, menelaus_roles:get_public_definitions(
+                                  ?VERSION_CHESHIRECAT))),
+    [{RoleName, misc:align_list(Buckets, Length, any)}];
+maybe_upgrade_role_to_cheshire_cat(Role) ->
     [Role].
 
 upgrade_user_roles(Version, Props) ->
