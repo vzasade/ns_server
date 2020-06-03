@@ -25,6 +25,7 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-include("ns_test.hrl").
 -endif.
 
 -export([
@@ -788,7 +789,15 @@ upgrade(Version, Config, Nodes) ->
             {value, started} ->
                 ?log_debug("Found unfinished roles upgrade. Continue.")
         end,
-        do_upgrade(Version, Nodes),
+
+        %% propagate upgrade key to nodes
+        ok = ns_config_rep:ensure_config_seen_by_nodes(Nodes),
+
+        replicated_storage:sync_to_me(
+          storage_name(), Nodes,
+          ?get_timeout(rbac_upgrade_key(Version), 60000)),
+
+        do_upgrade(Version),
         ok
     catch T:E ->
               ale:error(?USER_LOGGER, "Unsuccessful user storage upgrade.~n~p",
@@ -836,16 +845,76 @@ fetch_users_for_upgrade(Version) ->
                pipes:map(fun ({{user, I}, _}) -> I end)],
               pipes:collect()).
 
-do_upgrade(Version, Nodes) ->
-    %% propagate upgrade key to nodes
-    ok = ns_config_rep:ensure_config_seen_by_nodes(Nodes),
-
-    replicated_storage:sync_to_me(
-      storage_name(), Nodes, ?get_timeout(rbac_upgrade_key(Version), 60000)),
-
+do_upgrade(Version) ->
     UpdateUsers = fetch_users_for_upgrade(Version),
     lists:foreach(fun (Identity) ->
                           OldProps = get_user_props_raw(Identity),
                           NewProps = upgrade_user_roles(Version, OldProps),
                           store_user_validated(Identity, NewProps, same)
                   end, UpdateUsers).
+
+-ifdef(TEST).
+
+upgrade_test_() ->
+    DoTest =
+        fun (Version, Params) ->
+                lists:foreach(
+                  fun ({Name, Roles, _}) ->
+                          replicated_dets:toy_set(storage_name(),
+                                                  {user, {Name, local}},
+                                                  [{roles, Roles},
+                                                   {name, "Test"}])
+                  end, Params),
+                do_upgrade(Version),
+                Expected = [{Name, Expected} || {Name, _, Expected} <- Params],
+                Actual =
+                    lists:map(
+                      fun ({Name, _, _}) ->
+                              {_, [{roles, Roles}]} =
+                                  replicated_dets:get(storage_name(),
+                                                      {user, {Name, local}}),
+                              Roles
+                      end, Params),
+                ?assertListsEqual(Expected, Actual)
+        end,
+
+    Test =
+        fun (Version, Params) ->
+                {lists:flatten(io_lib:format("Upgrade to ~p", [Version])),
+                 ?cut(DoTest(Version, Params))}
+        end,
+    {foreach,
+     fun() ->
+             meck:new(cluster_compat_mode, [passthrough]),
+             meck:expect(cluster_compat_mode, is_enterprise,
+                         fun () -> true end),
+             meck:expect(cluster_compat_mode, get_compat_version,
+                         fun (_) -> ?VERSION_CHESHIRECAT end),
+
+             meck:new(ns_bucket, [passthrough]),
+             meck:expect(ns_bucket, get_buckets,
+                         fun () -> [{"test", [{uuid, <<"test_id">>}]}] end),
+
+             meck:new(replicated_dets, [passthrough]),
+             meck:expect(replicated_dets, select,
+                         replicated_dets:select(_, _, _, true)),
+             meck:expect(replicated_dets, set,
+                         replicated_dets:toy_set(_, _, _)),
+             replicated_dets:toy_init(storage_name())
+     end,
+     fun (_) ->
+             meck:unload(replicated_dets),
+             meck:unload(ns_bucket),
+             meck:unload(cluster_compat_mode),
+             ets:delete(storage_name())
+     end,
+     [Test(?VERSION_55,
+           [{"user1", [admin, cluster_admin],
+             [admin, cluster_admin, {bucket_full_access, [any]}]},
+            {"user2", [{bucket_admin, ["test"]}, ro_admin],
+             [{bucket_admin, ["test"]}, {bucket_full_access, ["test"]},
+              ro_admin]},
+            {"user3", [admin], [admin]}]),
+      Test(?VERSION_CHESHIRECAT, [])]}.
+
+-endif.
