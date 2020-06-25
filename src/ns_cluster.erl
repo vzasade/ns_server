@@ -374,6 +374,8 @@ handle_cast(leave, State) ->
     %% stop nearly everything
     ok = ns_server_cluster_sup:stop_ns_server(),
 
+    ok = chronicle_manager:leave(),
+
     stats_archiver:wipe(),
 
     %% in order to disconnect from rest of nodes we need new cookie
@@ -533,7 +535,8 @@ shun(RemoteNode) ->
                        (_Other) ->
                            skip
                    end),
-            ns_config_rep:ensure_config_pushed();
+            ns_config_rep:ensure_config_pushed(),
+            ok = chronicle_manager:remove_node(RemoteNode);
         true ->
             ?cluster_debug("Asked to shun myself. Leaving cluster.", []),
             leave()
@@ -632,6 +635,7 @@ maybe_rename(NewAddr, UserSupplied) ->
                   {address_save_failed, _} = Error ->
                       Error;
                   net_restarted ->
+                      ok = chronicle_manager:rename(),
                       ?cluster_debug("Renamed node from ~p to ~p.", [OldName, node()]),
                       renamed
               end
@@ -1321,6 +1325,8 @@ perform_actual_join(RemoteNode, NewCookie) ->
 
             erlang:raise(Type, Error, Stack)
     end,
+    ok = chronicle_manager:join_node(RemoteNode),
+
     ?cluster_debug("Join status: ~p, starting ns_server_cluster back",
                    [Status]),
     Status2 = case ns_server_cluster_sup:start_ns_server() of

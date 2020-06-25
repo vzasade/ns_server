@@ -54,6 +54,8 @@ init([]) ->
            {ns_config_sup, {ns_config_sup, start_link, []},
             permanent, infinity, supervisor,
             [ns_config_sup]},
+           {chronicle, {chronicle_manager, bootstrap, []},
+            permanent, brutal_kill, worker, [chronicle_manager]},
            {netconfig_updater, {netconfig_updater, start_link, []},
             permanent, infinity, supervisor, [netconfig_updater]},
            {json_rpc_connection_sup,
