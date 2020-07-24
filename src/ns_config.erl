@@ -50,25 +50,22 @@
 -define(DEFAULT_TIMEOUT, 15000).
 -define(TERMINATE_SAVE_TIMEOUT, 10000).
 
--export([eval/1,
-         uuid/0, uuid/1,
+-export([uuid/1,
          start_link/2, start_link/1,
-         merge/1,
-         get/2, get/1, get/0, set/2, set/1,
-         cas_remote_config/3, cas_local_config/2,
+         get/0,
+         set/2, set/1,
+         cas_remote_config/3,
          set_initial/2, update/1, update_key/2, update_key/3,
-         update_sub_key/3, set_sub/2, set_sub/3,
+         update_sub_key/3, set_sub/2,
          search_node/3, search_node/2, search_node/1,
          search_node_prop/3, search_node_prop/4,
          search_node_prop/5,
          search/3, search/2, search/1,
          search_prop/3, search_prop/4,
-         search_prop_tuple/3, search_prop_tuple/4,
          search_raw/2,
          search_with_vclock/2,
          run_txn/1, run_txn_with_config/2,
-         clear/0, clear/1,
-         proplist_get_value/3,
+         clear/1,
          merge_kv_pairs/3,
          sync_announcements/0,
          get_kv_list/0, get_kv_list/1, get_kv_list_with_config/1,
@@ -121,12 +118,6 @@ format_status(_Opt, [_PDict, State]) ->
 
 %% API
 
-eval(Fun) ->
-    gen_server:call(?MODULE, {eval, Fun}, ?DEFAULT_TIMEOUT).
-
-uuid() ->
-    eval(fun uuid/1).
-
 uuid(#config{uuid = UUID}) ->
     UUID.
 
@@ -144,10 +135,6 @@ reannounce() -> gen_server:call(?MODULE, reannounce).
 % Set & get configuration KVList, or [{Key, Val}*].
 %
 % ----------------------------------------
-
-%% Merge another config rather than replacing ours
-merge(KVList) ->
-    gen_server:call(?MODULE, {merge, KVList}).
 
 %% Set a value that will be overridden by any merged config
 set_initial(Key, Value) ->
@@ -417,19 +404,6 @@ update_sub_key(Key, SubKey, Fun) ->
                             end
                     end).
 
-%% Set subkey to a certain value. If subkey already exists then its value is
-%% replaced. Otherwise it is created.
-set_sub(Key, SubKey, Value) ->
-    Replace = fun (_) -> Value end,
-    ok = update_key(Key,
-                    fun (PList) ->
-                            case misc:key_update(SubKey, PList, Replace) of
-                                false ->
-                                    [ {SubKey, Value} | PList ];
-                                RV -> RV
-                            end
-                    end, [{SubKey, Value}]).
-
 %% Set subkeys of certain key in config. If some of the subkeys do not exist
 %% they are created.
 set_sub(Key, SubKVList) ->
@@ -451,7 +425,6 @@ set_sub_kvlist(PList, [ {SubKey, Value} | Rest ]) ->
     set_sub_kvlist(NewPList, Rest).
 
 
-clear() -> clear([]).
 clear(Keep) -> gen_server:call(?MODULE, {clear, Keep}).
 
 reload() ->
@@ -463,21 +436,18 @@ reload() ->
 % The Config object can be passed to the search*() related set
 % of functions.
 
-get()              -> diag_handler:diagnosing_timeouts(
-                        fun () ->
-                                gen_server:call(?MODULE, get, ?DEFAULT_TIMEOUT)
-                        end).
-get(Node)          -> get(Node, ?DEFAULT_TIMEOUT).
-get(Node, Timeout) -> gen_server:call({?MODULE, Node}, get, Timeout).
+get() ->
+    diag_handler:diagnosing_timeouts(fun () -> get(?DEFAULT_TIMEOUT) end).
+
+get(Timeout) ->
+    gen_server:call(?MODULE, get, Timeout).
 
 -spec get_kv_list() -> [{term(), term()}].
 get_kv_list() -> get_kv_list(?DEFAULT_TIMEOUT).
 
 -spec get_kv_list(timeout()) -> [{term(), term()}].
-get_kv_list(Timeout) -> get_kv_list_with_config(get(node(), Timeout)).
+get_kv_list(Timeout) -> get_kv_list_with_config(get(Timeout)).
 
-get_kv_list_with_config([DynamicConfig]) ->
-    DynamicConfig;
 get_kv_list_with_config(Config) ->
     config_dynamic(Config).
 
@@ -607,28 +577,6 @@ search_node_prop(Node, Config, Key, SubKey, DefaultSubVal) ->
             DefaultSubVal
     end.
 
-% Returns the full KeyValTuple (eg, {Key, Val}) or undefined.
-
-search_prop_tuple(Config, Key, SubKey) ->
-    search_prop_tuple(Config, Key, SubKey, undefined).
-
-% Returns the full KeyValTuple (eg, {Key, Val}) or the DefaultTuple.
-
-search_prop_tuple(Config, Key, SubKey, DefaultTuple) ->
-    case search(Config, Key) of
-        {value, PropList} ->
-            % We have our own proplist_get_value implementation because
-            % the tuples in our config might not be clean {Key, Val}
-            % 2-tuples, but might look like {Key, Val, More, Stuff},
-            % and we want to return the full tuple.
-            %
-            % proplists:get_value(SubKey, PropList, DefaultSubVal);
-            %
-            proplist_get_value(SubKey, PropList, DefaultTuple);
-        false ->
-            DefaultTuple
-    end.
-
 % The search_raw API does not strip out metadata from results.
 
 search_raw(undefined, _Key) -> false;
@@ -650,8 +598,6 @@ upgrade_config_explicitly(Upgrader) ->
 config_version_token() ->
     {ets:lookup(ns_config_announces_counter, changes_counter), erlang:whereis(?MODULE)}.
 
-fold(_Fun, Acc, undefined) ->
-    Acc;
 fold(_Fun, Acc, []) ->
     Acc;
 fold(Fun, Acc0, [KVList | Rest]) ->
@@ -666,18 +612,9 @@ fold(Fun, Acc0, [KVList | Rest]) ->
             end, Acc0, KVList),
     fold(Fun, Acc, Rest);
 fold(Fun, Acc, #config{dynamic = DL, static = SL}) ->
-    fold(Fun, fold(Fun, Acc, SL), DL);
-fold(Fun, Acc, 'latest-config-marker') ->
-    fold(Fun, Acc, get()).
+    fold(Fun, fold(Fun, Acc, SL), DL).
 
 %% Implementation
-
-proplist_get_value(_Key, [], DefaultTuple) -> DefaultTuple;
-proplist_get_value(Key, [KeyValTuple | Rest], DefaultTuple) ->
-    case element(1, KeyValTuple) =:= Key of
-        true  -> KeyValTuple;
-        false -> proplist_get_value(Key, Rest, DefaultTuple)
-    end.
 
 % Removes metadata like METADATA_VCLOCK from results.
 strip_metadata([{'_vclock', _} | Rest]) ->
@@ -911,9 +848,6 @@ handle_info({'EXIT', Pid, Reason},
 handle_info(Info, State) ->
     ?log_warning("Unhandled message: ~p", [Info]),
     {noreply, State}.
-
-handle_call({eval, Fun}, _From, State) ->
-    {reply, catch Fun(State), State};
 
 handle_call(reload, _From, State) ->
     wait_saver(State, infinity),
