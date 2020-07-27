@@ -33,7 +33,12 @@ leave() ->
     maybe_provision().
 
 rename() ->
-    leave().
+    List = chronicle_kv:submit_query(kv, get_snapshot, 10000, #{}),
+    leave(),
+    lists:foreach(
+      fun ({kv, Key, Value, _Revision}) ->
+              chronicle_kv:add(kv, Key, Value)
+      end, List).
 
 maybe_provision() ->
     case chronicle_agent:get_metadata() of
