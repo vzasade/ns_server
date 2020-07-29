@@ -397,11 +397,7 @@ handle_cast(leave, State) ->
                      {node, node(), erl_external_listeners}]),
 
 
-    %% set_initial here clears vclock on nodes_wanted. Thus making
-    %% sure that whatever nodes_wanted we will get through initial
-    %% config replication (right after joining cluster next time) will
-    %% not conflict with this value.
-    ns_config:set_initial(nodes_wanted, [node()]),
+    ns_cluster_membership:reset_topology(),
     {ok, _} = ns_cookie_manager:cookie_sync(),
 
     ?cluster_debug("Leaving cluster", []),

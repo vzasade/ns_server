@@ -25,6 +25,7 @@
 -export([get_nodes_with_status/1,
          get_nodes_with_status/2,
          get_nodes_with_status/3,
+         reset_topology/0,
          active_nodes/0,
          active_nodes/1,
          inactive_added_nodes/0,
@@ -85,6 +86,13 @@ get_nodes_with_status(Config, Nodes, Pred)
     [Node || Node <- Nodes,
              Pred(get_cluster_membership(Node, Config))].
 
+
+reset_topology() ->
+    %% set_initial here clears vclock on nodes_wanted. Thus making
+    %% sure that whatever nodes_wanted we will get through initial
+    %% config replication (right after joining cluster next time) will
+    %% not conflict with this value.
+    ns_config:set_initial(nodes_wanted, [node()]).
 active_nodes() ->
     active_nodes(ns_config:get()).
 
