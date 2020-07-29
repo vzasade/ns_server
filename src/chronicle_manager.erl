@@ -15,30 +15,83 @@
 %%
 -module(chronicle_manager).
 
+-behaviour(gen_server2).
+
 -include("ns_common.hrl").
+-include("ns_config.hrl").
 -include("cut.hrl").
 
--export([bootstrap/0, rename/0, leave/0, do_join_node/1, join_node/1,
-         remove_node/1]).
+-export([start_link/0,
+         init/1,
+         handle_call/3,
+         rename/0,
+         leave/0,
+         join_node/1,
+         remove_node/1,
+         get/4,
+         transaction/3,
+         set_multiple/2]).
 
-bootstrap() ->
+start_link() ->
+    gen_server2:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+init([]) ->
     application:set_env(chronicle, data_dir,
                         path_config:component_path(data, "config")),
     ok = application:ensure_started(chronicle, permanent),
+
     ok = maybe_provision(),
-    ignore.
+    {ok, subscribe_to_events()}.
 
-leave() ->
-    ok = wipe(),
-    maybe_provision().
-
-rename() ->
+handle_call(leave, _From, Pid) ->
+    ?log_debug("Handle leaving cluster"),
+    {reply, ok, reprovision(Pid)};
+handle_call(rename, _From, Pid) ->
+    ?log_debug("Handle renaming"),
     List = chronicle_kv:submit_query(kv, get_snapshot, 10000, #{}),
-    leave(),
+    NewPid = reprovision(Pid),
     lists:foreach(
       fun ({kv, Key, Value, _Revision}) ->
               chronicle_kv:add(kv, Key, Value)
-      end, List).
+      end, List),
+    {reply, ok, NewPid};
+handle_call({add_node, Node}, _From, Pid) ->
+    ?log_debug("Adding node ~p", [Node]),
+    chronicle:add_voters([Node]),
+    {reply, ok, Pid};
+handle_call({join_node, Node}, _From, Pid) ->
+    ok = wipe(Pid),
+    ?log_debug("Joining to ~p", [Node]),
+    gen_server2:call({?MODULE, Node}, {add_node, node()}),
+    {reply, ok, subscribe_to_events()}.
+
+leave() ->
+    gen_server2:call(?MODULE, leave).
+
+rename() ->
+    gen_server2:call(?MODULE, rename).
+
+join_node(Node) ->
+    gen_server2:call(?MODULE, {join_node, Node}).
+
+reprovision(Pid) ->
+    ok = wipe(Pid),
+    ok = maybe_provision(),
+    subscribe_to_events().
+
+subscribe_to_events() ->
+    ns_pubsub:subscribe_link(
+      chronicle_kv:event_manager(kv),
+      fun ({{key, Key}, _Rev, {updated, Value}}) ->
+              gen_event:notify(ns_config_events, {Key, Value});
+          ({{key, Key}, _Rev, deleted}) ->
+              gen_event:notify(ns_config_events, {Key, ?DELETED_MARKER})
+      end).
+
+enabled() ->
+    ns_node_disco:couchdb_node() =/= node() andalso
+        cluster_compat_mode:is_cluster_cheshirecat('latest-config-marker').
+
 
 maybe_provision() ->
     case chronicle_agent:get_metadata() of
@@ -50,19 +103,110 @@ maybe_provision() ->
             ok
     end.
 
-wipe() ->
+wipe(Pid) ->
     ?log_debug("Wiping the config"),
+    ns_pubsub:unsubscribe(Pid),
     chronicle_agent:wipe().
-
-do_join_node(Node) ->
-    ?log_debug("Adding node ~p", [Node]),
-    chronicle:add_voters([Node]).
-
-join_node(Node) ->
-    ok = wipe(),
-    ?log_debug("Joining to ~p", [Node]),
-    rpc:call(Node, ?MODULE, do_join_node, [node()], 20000).
 
 remove_node(Node) ->
     ?log_debug("Removing node ~p", [Node]),
     chronicle:remove_voters([Node]).
+
+
+get(Config, Key, Default, Opts) ->
+    case get(Config, Key, Opts) of
+        {error, not_found} ->
+            Default;
+        {ok, Value} ->
+            Value
+    end.
+
+get(Config, Key, Opts) ->
+    case get_with_revision(Config, Key, Opts) of
+        {error, not_found} ->
+            {error, not_found};
+        {ok, {Value, _}} ->
+            {ok, Value}
+    end.
+
+get_with_revision(Snapshot, Key, _Opts) when is_list(Snapshot) ->
+    case lists:keysearch(Key, 2, Snapshot) of
+        {value, {kv, Key, V, Revision}} ->
+            {ok, {V, Revision}};
+        false ->
+            {error, not_found}
+    end;
+get_with_revision(Snapshot, Key, _Opts) when is_map(Snapshot) ->
+    case maps:find(Key, Snapshot) of
+        {ok, VR} ->
+            {ok, VR};
+        error ->
+            {error, not_found}
+    end;
+get_with_revision(Config, Key, Opts) ->
+    case enabled() of
+        true ->
+            chronicle_kv:get(kv, Key, Opts);
+        false ->
+            case ns_config:search(Config, Key) of
+                {value, Value} ->
+                    {ok, {Value, no_revision}};
+                false ->
+                    {error, not_found}
+            end
+    end.
+
+set_multiple(List, Opts) ->
+    case enabled() of
+        true ->
+            chronicle_kv:transaction(
+              kv, [],
+              fun (_) ->
+                      {commit, [{set, K, V} || {K, V} <- List]}
+              end, Opts);
+        false ->
+            ns_config:set(List)
+    end.
+
+transaction(Keys, Fun, Opts) ->
+    case enabled() of
+        true ->
+            chronicle_kv:transaction(kv, Keys, Fun, Opts);
+        false ->
+            RV =
+                ns_config:run_txn(
+                  fun (Config, Set) ->
+                          Snapshot =
+                              maps:from_list(
+                                lists:filtermap(
+                                  fun (Key) ->
+                                          case ns_config:search(Config, Key) of
+                                              {value, V} ->
+                                                  {true,
+                                                   {Key, {V, no_revision}}};
+                                              false ->
+                                                  false
+                                          end
+                                  end, Keys)),
+                          case Fun(Snapshot) of
+                              {commit, List} ->
+                                  {commit,
+                                   lists:foldl(
+                                     fun ({set, Key, Value}, Acc) ->
+                                             Set(Key, Value, Acc);
+                                         ({delete, Key}, Acc) ->
+                                             Set(Key, ?DELETED_MARKER, Acc)
+                                     end, Config, List)};
+                              {abort, Error} ->
+                                  {abort, Error}
+                          end
+                  end),
+            case RV of
+                {commit, _} ->
+                    {ok, no_revision};
+                {abort, Error} ->
+                    Error;
+                retry_needed ->
+                    erlang:error(exceeded_retries)
+            end
+    end.
