@@ -30,12 +30,7 @@
 -include("ns_common.hrl").
 
 rebalancer(Config) ->
-   case ns_config:search(Config, rebalancer_pid) of
-       {value, Pid} when is_pid(Pid) ->
-           Pid;
-       _ ->
-           undefined
-   end.
+    chronicle_manager:get(Config, rebalancer_pid, undefined, #{}).
 
 running() ->
     running(ns_config:latest()).
@@ -44,33 +39,34 @@ running(Config) ->
     rebalancer(Config) =/= undefined.
 
 type() ->
-    ns_config:read_key_fast(rebalance_type, rebalance).
+    chronicle_manager:get(ns_config:latest(), rebalance_type, rebalance, #{}).
 
 status_uuid() ->
-    ns_config:read_key_fast(rebalance_status_uuid, undefined).
+    chronicle_manager:get(ns_config:latest(),
+                          rebalance_status_uuid, undefined, #{}).
 
 status() ->
-    ns_config:read_key_fast(rebalance_status, undefined).
+    status(ns_config:latest()).
+
+status(Config) ->
+    chronicle_manager:get(Config, rebalance_status, undefined, #{}).
 
 reset_status(Fn) ->
-    ok =
-        ns_config:update(
-          fun ({rebalance_status, Value}) ->
-                  case Value of
+    {ok, _} =
+        chronicle_manager:transaction(
+          [rebalance_status],
+          fun (Config) ->
+                  case status(Config) of
                       running ->
-                          NewValue = Fn(),
-                          {update, {rebalance_status, NewValue}};
+                          [{set, rebalance_status, Fn()},
+                           {delete, rebalancer_pid}];
                       _ ->
-                          skip
-                  end;
-              ({rebalancer_pid, Pid}) when is_pid(Pid) ->
-                  {update, {rebalancer_pid, undefined}};
-              (_Other) ->
-                  skip
-          end).
+                          []
+                  end
+          end, #{}).
 
 set_status(Type, Status, Pid) ->
-    ns_config:set(
+    chronicle_manager:set_multiple(
       [{rebalance_status, Status},
        {rebalance_status_uuid, couch_uuids:random()},
        {rebalancer_pid, Pid},
@@ -86,7 +82,7 @@ set_status(Type, Status, Pid) ->
                         _ ->
                             undefined
                     end}]
-          end).
+          end, #{}).
 
 start(KnownNodes, EjectedNodes, DeltaRecoveryBuckets) ->
     ns_orchestrator:start_rebalance(KnownNodes, EjectedNodes,
