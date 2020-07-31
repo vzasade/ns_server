@@ -26,7 +26,7 @@
          handle_call/3,
          rename/0,
          leave/0,
-         join_node/1,
+         join_node/2,
          remove_node/1,
          get/2,
          get/3,
@@ -75,8 +75,13 @@ leave() ->
 rename() ->
     gen_server2:call(?MODULE, rename).
 
-join_node(Node) ->
-    gen_server2:call(?MODULE, {join_node, Node}).
+join_node(Node, CompatVer) ->
+    case enabled(CompatVer) of
+        true ->
+            gen_server2:call(?MODULE, {join_node, Node});
+        false ->
+            ok
+    end.
 
 reprovision(Pid) ->
     ok = wipe(Pid),
@@ -93,9 +98,14 @@ subscribe_to_events() ->
       end).
 
 enabled() ->
-    ns_node_disco:couchdb_node() =/= node() andalso
-        cluster_compat_mode:is_cluster_cheshirecat('latest-config-marker').
+    enabled(cluster_compat_mode:effective_cluster_compat_version_for(
+              cluster_compat_mode:get_compat_version())).
 
+enabled(CompatVersion) ->
+    ns_node_disco:couchdb_node() =/= node() andalso
+        CompatVersion >=
+        cluster_compat_mode:effective_cluster_compat_version_for(
+          ?VERSION_CHESHIRECAT).
 
 maybe_provision() ->
     case chronicle_agent:get_metadata() of
