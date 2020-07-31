@@ -1227,6 +1227,8 @@ do_complete_join(NodeKVList) ->
         OtpNode = expect_json_property_atom(<<"otpNode">>, NodeKVList),
         OtpCookie = expect_json_property_atom(<<"otpCookie">>, NodeKVList),
         MyNode = expect_json_property_atom(<<"targetNode">>, NodeKVList),
+        Compat = expect_json_property_atom(<<"clusterCompatibility">>,
+                                           NodeKVList),
 
         {ok, Services} = get_requested_services(NodeKVList),
         case check_can_join_to(NodeKVList, Services) of
@@ -1236,7 +1238,7 @@ do_complete_join(NodeKVList) ->
                         {error, join_race_detected,
                          <<"Node is already part of cluster.">>, system_not_joinable};
                     true ->
-                        perform_actual_join(OtpNode, OtpCookie)
+                        perform_actual_join(OtpNode, OtpCookie, Compat)
                 end;
             Error -> Error
         end
@@ -1247,7 +1249,7 @@ do_complete_join(NodeKVList) ->
     end.
 
 
-perform_actual_join(RemoteNode, NewCookie) ->
+perform_actual_join(RemoteNode, NewCookie, CompatVer) ->
     ?cluster_log(0002, "Node ~p is joining cluster via node ~p.",
                  [node(), RemoteNode]),
     %% let ns_memcached know that we don't need to preserve data at all
@@ -1321,7 +1323,8 @@ perform_actual_join(RemoteNode, NewCookie) ->
 
             erlang:raise(Type, Error, Stack)
     end,
-    ok = chronicle_manager:join_node(RemoteNode),
+
+    ok = chronicle_manager:join_node(RemoteNode, CompatVer),
 
     ?cluster_debug("Join status: ~p, starting ns_server_cluster back",
                    [Status]),
