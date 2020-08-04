@@ -631,7 +631,7 @@ maybe_rename(NewAddr, UserSupplied) ->
                   {address_save_failed, _} = Error ->
                       Error;
                   net_restarted ->
-                      ok = chronicle_manager:rename(),
+                      ok = chronicle_manager:rename(OldName),
                       ?cluster_debug("Renamed node from ~p to ~p.", [OldName, node()]),
                       renamed
               end
