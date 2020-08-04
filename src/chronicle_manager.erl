@@ -24,7 +24,7 @@
 -export([start_link/0,
          init/1,
          handle_call/3,
-         rename/0,
+         rename/1,
          leave/0,
          join_node/2,
          remove_node/1,
@@ -47,13 +47,17 @@ init([]) ->
 handle_call(leave, _From, Pid) ->
     ?log_debug("Handle leaving cluster"),
     {reply, ok, reprovision(Pid)};
-handle_call(rename, _From, Pid) ->
+handle_call({rename, OldNode}, _From, Pid) ->
     ?log_debug("Handle renaming"),
     List = chronicle_kv:submit_query(kv, get_snapshot, 10000, #{}),
     NewPid = reprovision(Pid),
+    NewNode = node(),
     lists:foreach(
       fun ({kv, Key, Value, _Revision}) ->
-              chronicle_kv:add(kv, Key, Value)
+              chronicle_kv:add(
+                kv,
+                misc:rewrite_value(OldNode, NewNode, Key),
+                misc:rewrite_value(OldNode, NewNode, Value))
       end, List),
     {reply, ok, NewPid};
 handle_call({add_node, Node}, _From, Pid) ->
@@ -69,8 +73,8 @@ handle_call({join_node, Node}, _From, Pid) ->
 leave() ->
     gen_server2:call(?MODULE, leave).
 
-rename() ->
-    gen_server2:call(?MODULE, rename).
+rename(OldNode) ->
+    gen_server2:call(?MODULE, {rename, OldNode}).
 
 join_node(Node, CompatVer) ->
     case enabled(CompatVer) of
