@@ -30,7 +30,8 @@
 -endif.
 
 -export([start/2, is_possible/1, orchestrate/2,
-         get_failover_vbuckets/2, promote_max_replicas/4]).
+         get_failover_vbuckets/2, promote_max_replicas/4,
+         clear_failover_vbuckets_commands/2]).
 
 -define(DATA_LOST, 1).
 -define(FAILOVER_OPS_TIMEOUT, ?get_timeout(failover_ops_timeout, 10000)).
@@ -190,28 +191,29 @@ update_failover_vbuckets(Results) ->
 
                                  {Node, {Bucket, VBs}}
                          end, Results),
-    {commit, _} =
-        ns_config:run_txn(
-          fun (Config, Set) ->
-                  {commit,
-                   lists:foldl(?cut(update_failover_vbuckets(Set, _, _)),
-                               Config, GroupedByNode)}
-          end).
+    ok =
+        chronicle_manager:transaction(
+          [{node, N, failover_vbuckets} || {N, _} <- GroupedByNode],
+          [update_failover_vbuckets(_, Pair) || Pair <- GroupedByNode]).
 
-update_failover_vbuckets(Set, {Node, BucketResults}, Config) ->
-    ExistingBucketResults = get_failover_vbuckets(Config, Node),
+clear_failover_vbuckets_commands(_, Nodes) ->
+    {commit, [{{node, N, failover_vbuckets}, []} || N <- Nodes]}.
+
+update_failover_vbuckets(Snapshot, {Node, BucketResults}) ->
+    ExistingBucketResults = get_failover_vbuckets(Snapshot, Node),
     Merged = merge_failover_vbuckets(ExistingBucketResults, BucketResults),
 
     ?log_debug("Updating failover_vbuckets for ~p with ~p~n"
                "Existing vbuckets: ~p~nNew vbuckets: ~p",
                [Node, Merged, ExistingBucketResults, BucketResults]),
 
-    case Merged of
-        ExistingBucketResults ->
-            Config;
-        _ ->
-            Set({node, Node, failover_vbuckets}, Merged, Config)
-    end.
+    {commit,
+     case Merged of
+         ExistingBucketResults ->
+             [];
+         _ ->
+             [{set, {node, Node, failover_vbuckets}, Merged}]
+     end}.
 
 merge_failover_vbuckets(ExistingBucketResults, BucketResults) ->
     Grouped =
@@ -503,7 +505,8 @@ is_possible(Nodes) ->
     end.
 
 get_failover_vbuckets(Config, Node) ->
-    ns_config:search(Config, {node, Node, failover_vbuckets}, []).
+    chronicle_manager:get(Config, {node, Node, failover_vbuckets},
+                          #{default => []}).
 
 
 -ifdef(TEST).

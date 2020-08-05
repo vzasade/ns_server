@@ -27,6 +27,7 @@
          rename/1,
          leave/0,
          join_node/2,
+         prepare_to_join/2,
          remove_node/1,
          get/2,
          get/3,
@@ -83,6 +84,20 @@ join_node(Node, CompatVer) ->
     case enabled(CompatVer) of
         true ->
             gen_server2:call(?MODULE, {join_node, Node});
+        false ->
+            ok
+    end.
+
+prepare_to_join(RemoteNode, CompatVer) ->
+    case enabled(CompatVer) of
+        true ->
+            strip_revision(
+              chronicle_kv:transaction(
+                kv, [],
+                fun (_) ->
+                        {commit, [{set, nodes_wanted, [node(), RemoteNode]},
+                                  {set, {node, node(), membership}, active}]}
+                end, #{}));
         false ->
             ok
     end.
@@ -274,10 +289,16 @@ legacy_transaction(Keys, Fun) ->
             erlang:error(exceeded_retries)
     end.
 
+should_move(nodes_wanted) ->
+    true;
+should_move(server_groups) ->
+    true;
+should_move({node, _, membership}) ->
+    true;
+should_move({node, _, services}) ->
+    true;
 should_move(_) ->
     false.
-
--dialyzer({nowarn_function, upgrade/1}).
 
 upgrade(Config) ->
     ?log_debug("Chronicle content before the upgrade ~p",

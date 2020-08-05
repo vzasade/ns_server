@@ -526,13 +526,17 @@ rebalance_body(KeepNodes,
     ok = apply_delta_recovery_buckets(DeltaRecoveryBuckets,
                                       KVDeltaNodes, BucketConfigs),
     ok = check_test_condition(after_apply_delta_recovery),
-    ok = maybe_clear_recovery_type(KeepNodes),
+
+    ok = chronicle_manager:transaction(
+           [ns_cluster_membership:clear_recovery_type_commands(_, KeepNodes),
+            failover:clear_failover_vbuckets_commands(_, KeepNodes)]),
+
     master_activity_events:note_rebalance_stage_completed(
       [kv, kv_delta_recovery]),
     ok = service_janitor:cleanup(),
 
     ok = leader_activities:activate_quorum_nodes(KeepNodes),
-    ns_cluster_membership:activate(KeepNodes),
+    ok = ns_cluster_membership:activate(KeepNodes),
 
     pull_and_push_config(EjectNodesAll ++ KeepNodes),
 
@@ -1029,12 +1033,12 @@ apply_delta_recovery_buckets(DeltaRecoveryBuckets, DeltaNodes, CurrentBuckets) -
                                                          CurrentBuckets),
 
     NewBuckets = misc:update_proplist(CurrentBuckets, TransitionalBuckets),
-    NodeChanges = [[{{node, N, failover_vbuckets}, []},
-                    {{node, N, membership}, active}] || N <- DeltaNodes],
-    BucketChanges = {buckets, [{configs, NewBuckets}]},
 
-    Changes = lists:flatten([BucketChanges, NodeChanges]),
-    ok = ns_config:set(Changes),
+    ok = chronicle_manager:transaction(
+           [ns_cluster_membership:activate_commands(_, DeltaNodes),
+            failover:clear_failover_vbuckets_commands(_, DeltaNodes)]),
+
+    ok = ns_config:set([{buckets, [{configs, NewBuckets}]}]),
 
     case ns_config_rep:ensure_config_seen_by_nodes(DeltaNodes) of
         ok ->
@@ -1055,12 +1059,6 @@ apply_delta_recovery_buckets(DeltaRecoveryBuckets, DeltaNodes, CurrentBuckets) -
       end, TransitionalBuckets),
 
     ok.
-
-maybe_clear_recovery_type(Nodes) ->
-    NodeChanges = [[{{node, N, recovery_type}, none},
-                    {{node, N, failover_vbuckets}, []}]
-                   || N <- Nodes],
-    ok = ns_config:set(lists:flatten(NodeChanges)).
 
 wait_for_bucket(Bucket, Nodes) ->
     ?log_debug("Waiting until bucket ~p gets ready on nodes ~p", [Bucket, Nodes]),
@@ -1272,10 +1270,13 @@ drop_old_2i_indexes(KeepNodes) ->
     %% Clear recovery type for non-KV nodes here.
     %% recovery_type for nodes running KV services gets cleared later.
     NonKV = [N || N <- RecoveryNodes,
-                  not lists:member(kv, ns_cluster_membership:node_services(Config, N))],
-    NodeChanges = [[{{node, N, recovery_type}, none},
-                    {{node, N, membership}, active}] || N <- NonKV],
-    ok = ns_config:set(lists:flatten(NodeChanges)),
+                  not lists:member(
+                        kv, ns_cluster_membership:node_services(Config, N))],
+
+    ok =  chronicle_manager:transaction(
+           [ns_cluster_membership:activate_commands(_, NonKV),
+            ns_cluster_membership:clear_recovery_type_commands(_, NonKV)]),
+
     Errors = [{N, RV}
               || {N, RV} <- Oks,
                  RV =/= ok]
