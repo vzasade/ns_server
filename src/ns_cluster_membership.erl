@@ -25,6 +25,7 @@
 -export([get_nodes_with_status/1,
          get_nodes_with_status/2,
          get_nodes_with_status/3,
+         nodes_wanted/1,
          server_groups/0,
          server_groups/1,
          reset_topology/0,
@@ -44,6 +45,7 @@
          is_balanced/0,
          get_recovery_type/2,
          update_recovery_type/2,
+         add_node/3,
          is_newly_added_node/1,
          attach_node_uuids/2
         ]).
@@ -77,8 +79,7 @@ get_nodes_with_status(PredOrStatus) ->
     get_nodes_with_status(ns_config:latest(), PredOrStatus).
 
 get_nodes_with_status(Config, PredOrStatus) ->
-    get_nodes_with_status(Config,
-                          ns_node_disco:nodes_wanted(Config), PredOrStatus).
+    get_nodes_with_status(Config, nodes_wanted(Config), PredOrStatus).
 
 get_nodes_with_status(Config, Nodes, Status)
   when is_atom(Status) ->
@@ -88,12 +89,17 @@ get_nodes_with_status(Config, Nodes, Pred)
     [Node || Node <- Nodes,
              Pred(get_cluster_membership(Node, Config))].
 
+nodes_wanted() ->
+    nodes_wanted(ns_config:latest()).
+
+nodes_wanted(Config) ->
+    lists:usort(chronicle_manager:get(Config, nodes_wanted, [], #{})).
 
 server_groups() ->
     server_groups(ns_config:latest()).
 
 server_groups(Config) ->
-    {value, Groups} = ns_config:search(Config, server_groups),
+    {ok, Groups} = chronicle_manager:get(Config, server_groups, #{}),
     Groups.
 
 reset_topology() ->
@@ -118,15 +124,10 @@ actual_active_nodes(Config) ->
     get_nodes_with_status(Config, ns_node_disco:nodes_actual(), active).
 
 get_cluster_membership(Node) ->
-    get_cluster_membership(Node, ns_config:get()).
+    get_cluster_membership(Node, ns_config:latest()).
 
 get_cluster_membership(Node, Config) ->
-    case ns_config:search(Config, {node, Node, membership}) of
-        {value, Value} ->
-             Value;
-        _ ->
-            inactiveAdded
-    end.
+    chronicle_manager:get(Config, {node, Node, membership}, inactiveAdded, #{}).
 
 get_node_server_group(Node, Config) ->
     {value, Groups} = ns_config:search(Config, server_groups),
@@ -143,7 +144,7 @@ get_node_server_group_inner(Node, [SG | Rest]) ->
     end.
 
 system_joinable() ->
-    ns_node_disco:nodes_wanted() =:= [node()].
+    nodes_wanted() =:= [node()].
 
 activate(Nodes) ->
     ns_config:set([{{node, Node, membership}, active} ||
@@ -168,7 +169,7 @@ re_failover_possible(NodeString) ->
         Node when is_atom(Node) ->
             RecoveryType = ns_config:search(ns_config:latest(), {node, Node, recovery_type}, none),
             Membership = ns_config:search(ns_config:latest(), {node, Node, membership}),
-            Ok = (lists:member(Node, ns_node_disco:nodes_wanted())
+            Ok = (lists:member(Node, nodes_wanted())
                   andalso RecoveryType =/= none
                   andalso Membership =:= {value, inactiveAdded}),
             case Ok of
@@ -196,35 +197,84 @@ re_failover(NodeString) ->
     end.
 
 get_recovery_type(Config, Node) ->
-    ns_config:search(Config, {node, Node, recovery_type}, none).
+    chronicle_manager:get(Config, {node, Node, recovery_type}, none, #{}).
 
--spec update_recovery_type(node(), delta | full) -> ok | bad_node | conflict.
+-spec update_recovery_type(node(), delta | full) -> ok | bad_node.
 update_recovery_type(Node, NewType) ->
-    RV = ns_config:run_txn(
-           fun (Config, Set) ->
-                   Membership = ns_config:search(Config, {node, Node, membership}),
-
+    RV = chronicle_manager:transaction(
+           [{node, Node, membership},
+            {node, Node, recovery_type}],
+           fun (Config) ->
+                   Membership = get_cluster_membership(Node, Config),
+                   RecoveryType = get_recovery_type(Config, Node),
                    case (Membership =:= {value, inactiveAdded}
-                         andalso get_recovery_type(Config, Node) =/= none)
+                         andalso RecoveryType =/= none)
                        orelse Membership =:= {value, inactiveFailed} of
                        true ->
-                           Config1 = Set({node, Node, membership}, inactiveAdded, Config),
                            {commit,
-                            Set({node, Node, recovery_type}, NewType, Config1)};
+                            [{set, {node, Node, membership}, inactiveAdded},
+                             {set, {node, Node, recovery_type}, NewType}]};
                        false ->
-                           {abort, {error, bad_node}}
+                           {abort, bad_node}
                    end
-           end),
+           end, #{}),
 
     case RV of
-        {commit, _} ->
+        {ok, _} ->
             ok;
-        {abort, not_needed} ->
-            ok;
-        {abort, {error, Error}} ->
-            Error;
-        retry_needed ->
-            erlang:error(exceeded_retries)
+        Error ->
+            Error
+    end.
+
+add_node(Node, GroupUUID, Services) ->
+    chronicle_manager:transaction(
+      [nodes_wanted, server_groups],
+      fun (Snapshot) ->
+              NodesWanted = nodes_wanted(Snapshot),
+              case lists:member(Node, NodesWanted) of
+                  true ->
+                      {abort, node_present};
+                  false ->
+                      Groups = server_groups(Snapshot),
+                      case add_node_to_groups(Groups, GroupUUID, Node) of
+                          {error, Error} ->
+                              {abort, Error};
+                          NewGroups ->
+                              {commit,
+                               [{set, nodes_wanted,
+                                 lists:usort([Node | NodesWanted])},
+                                {set, {node, Node, membership}, inactiveAdded},
+                                {set, {node, Node, services}, Services},
+                                {set, server_groups, NewGroups}]}
+                      end
+              end
+      end, #{}).
+
+add_node_to_groups(Groups, GroupUUID, Node) ->
+    MaybeGroup0 = [G || G <- Groups,
+                        proplists:get_value(uuid, G) =:= GroupUUID],
+    MaybeGroup = case MaybeGroup0 of
+                     [] ->
+                         case GroupUUID of
+                             undefined ->
+                                 [hd(Groups)];
+                             _ ->
+                                 []
+                         end;
+                     _ ->
+                         true = (undefined =/= GroupUUID),
+                         MaybeGroup0
+                 end,
+    case MaybeGroup of
+        [] ->
+            {error, group_not_found};
+        [TheGroup] ->
+            GroupNodes = proplists:get_value(nodes, TheGroup),
+            true = (is_list(GroupNodes)),
+            NewGroupNodes = lists:usort([Node | GroupNodes]),
+            NewGroup =
+                lists:keystore(nodes, 1, TheGroup, {nodes, NewGroupNodes}),
+            lists:usort([NewGroup | (Groups -- MaybeGroup)])
     end.
 
 supported_services() ->

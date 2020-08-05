@@ -30,6 +30,7 @@
          remove_node/1,
          upgrade/1,
          get/4,
+         get/3,
          transaction/3,
          set_multiple/2]).
 
@@ -226,10 +227,16 @@ transaction(Keys, Fun, Opts) ->
             end
     end.
 
+should_move(nodes_wanted) ->
+    true;
+should_move(server_groups) ->
+    true;
+should_move({node, _, membership}) ->
+    true;
+should_move({node, _, services}) ->
+    true;
 should_move(_) ->
     false.
-
--dialyzer({nowarn_function, upgrade/1}).
 
 upgrade(Config) ->
     ?log_debug("Chronicle content before the upgrade ~p",
