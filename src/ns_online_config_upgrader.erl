@@ -43,8 +43,11 @@ do_upgrade_config(Config, FinalVersion) ->
             upgrade_compat_version(?VERSION_50);
         {value, Ver} ->
             {NewVersion, Upgrade} = upgrade(Ver, Config),
+            KeysToDelete = maybe_upgrade_to_cronicle(NewVersion, Config),
+
             ?log_info("Performing online config upgrade to ~p", [NewVersion]),
             upgrade_compat_version(NewVersion) ++
+                [{delete, K} || K <- KeysToDelete] ++
                 maybe_final_upgrade(NewVersion) ++ Upgrade
     end.
 
@@ -54,6 +57,11 @@ upgrade_compat_version(NewVersion) ->
 maybe_final_upgrade(?LATEST_VERSION_NUM) ->
     ns_audit_cfg:upgrade_descriptors();
 maybe_final_upgrade(_) ->
+    [].
+
+maybe_upgrade_to_cronicle(?VERSION_CHESHIRECAT, Config) ->
+    chronicle_manager:upgrade(Config);
+maybe_upgrade_to_cronicle(_, _) ->
     [].
 
 upgrade(?VERSION_50, Config) ->

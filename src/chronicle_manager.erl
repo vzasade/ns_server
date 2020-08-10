@@ -30,6 +30,7 @@
          remove_node/1,
          get/2,
          get/3,
+         upgrade/1,
          transaction/1,
          transaction/2,
          transaction/3,
@@ -258,3 +259,25 @@ legacy_transaction(Keys, Fun) ->
         retry_needed ->
             erlang:error(exceeded_retries)
     end.
+
+should_move(_) ->
+    false.
+
+-dialyzer({nowarn_function, upgrade/1}).
+
+upgrade(Config) ->
+    ?log_debug("Chronicle content before the upgrade ~p",
+               [chronicle_kv:submit_query(kv, get_snapshot, 10000, #{})]),
+    ns_config:fold(
+      fun (Key, Value, Acc) ->
+              case should_move(Key) of
+                  true ->
+                      {ok, Rev} = chronicle_kv:set(kv, Key, Value),
+                      ?log_debug("Key ~p is migrated to chronicle. Rev = ~p."
+                                 "Value = ~p",
+                                 [Key, Rev, Value]),
+                      [Key | Acc];
+                  false ->
+                      Acc
+              end
+      end, [], Config).
