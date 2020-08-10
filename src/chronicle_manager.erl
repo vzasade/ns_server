@@ -27,7 +27,13 @@
          rename/0,
          leave/0,
          join_node/1,
-         remove_node/1]).
+         remove_node/1,
+         get/2,
+         get/3,
+         transaction/1,
+         transaction/2,
+         transaction/3,
+         set_multiple/1]).
 
 start_link() ->
     gen_server2:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -85,6 +91,11 @@ subscribe_to_events() ->
               gen_event:notify(ns_config_events, {Key, ?DELETED_MARKER})
       end).
 
+enabled() ->
+    ns_node_disco:couchdb_node() =/= node() andalso
+        cluster_compat_mode:is_cluster_cheshirecat('latest-config-marker').
+
+
 maybe_provision() ->
     case chronicle_agent:get_metadata() of
         {error, not_provisioned} ->
@@ -103,3 +114,147 @@ wipe(Pid) ->
 remove_node(Node) ->
     ?log_debug("Removing node ~p", [Node]),
     chronicle:remove_voters([Node]).
+
+get(Key, Opts) ->
+    get(ns_config:latest(), Key, Opts).
+
+get(Config, Key, #{required := true} = Opts) ->
+    {ok, Value} = get(Config, Key, maps:remove(required, Opts)),
+    Value;
+get(Config, Key, #{default := Default} = Opts) ->
+    case get(Config, Key, maps:remove(default, Opts)) of
+        {error, not_found} ->
+            Default;
+        {ok, Value} ->
+            Value
+    end;
+get(Config, Key, #{return_revision := true} = Opts) ->
+    get_with_revision(Config, Key, Opts);
+get(Config, Key, Opts) ->
+    case get_with_revision(Config, Key, Opts) of
+        {error, not_found} ->
+            {error, not_found};
+        {ok, {Value, _}} ->
+            {ok, Value}
+    end.
+
+get_with_revision(Snapshot, Key, _Opts) when is_list(Snapshot) ->
+    case lists:keysearch(Key, 2, Snapshot) of
+        {value, {kv, Key, V, Revision}} ->
+            {ok, {V, Revision}};
+        false ->
+            {error, not_found}
+    end;
+get_with_revision(Snapshot, Key, _Opts) when is_map(Snapshot) ->
+    case maps:find(Key, Snapshot) of
+        {ok, VR} ->
+            {ok, VR};
+        error ->
+            {error, not_found}
+    end;
+get_with_revision(Config, Key, Opts) ->
+    case enabled() of
+        true ->
+            chronicle_kv:get(kv, Key, maps:remove(return_revision, Opts));
+        false ->
+            case ns_config:search(Config, Key) of
+                {value, Value} ->
+                    {ok, {Value, no_revision}};
+                false ->
+                    {error, not_found}
+            end
+    end.
+
+set_multiple(List) ->
+    set_multiple(List, #{}).
+
+set_multiple(List, Opts) ->
+    transaction([], fun (_) ->
+                            {commit, [{set, K, V} || {K, V} <- List]}
+                    end, Opts).
+
+transaction(FunOrList) ->
+    transaction([], FunOrList, #{}).
+
+transaction(Keys, FunOrList) ->
+    transaction(Keys, FunOrList, #{}).
+
+get_txn_commands(_Snapshot, [], Acc) ->
+    {commit, lists:flatten(Acc)};
+get_txn_commands(Snapshot, [Fun | Rest], Acc) ->
+    case Fun(Snapshot) of
+        {abort, _} = Abort ->
+            Abort;
+        {commit, Commands} ->
+            get_txn_commands(Snapshot, Rest, [Commands | Acc])
+    end.
+
+strip_revision({ok, _}) ->
+    ok;
+strip_revision(Other) ->
+    Other.
+
+transaction(Keys, FunOrList, #{return_revision := true} = Opts) ->
+    do_transaction(Keys, FunOrList, maps:remove(return_revision, Opts));
+transaction(Keys, FunOrList, Opts) ->
+    strip_revision(do_transaction(Keys, FunOrList, Opts)).
+
+do_transaction(Keys, List, Opts) when is_list(List) ->
+    do_transaction(Keys, get_txn_commands(_, List, []), Opts);
+do_transaction(Keys, Fun, Opts) ->
+    case enabled() of
+        true ->
+            chronicle_kv:transaction(kv, Keys, Fun, Opts);
+        false ->
+            legacy_transaction(Keys, Fun)
+    end.
+
+convert_command_to_legacy({set, Key, Value}) ->
+    {Key, Value};
+convert_command_to_legacy({delete, Key}) ->
+    {Key, ?DELETED_MARKER}.
+
+legacy_transaction([], Fun) ->
+    case Fun(#{}) of
+        {commit, Commands} ->
+            ok = ns_config:set([convert_command_to_legacy(C) || C <- Commands]),
+            {ok, no_revision};
+        {abort, _} = Abort ->
+            Abort
+    end;
+legacy_transaction(Keys, Fun) ->
+    RV =
+        ns_config:run_txn(
+          fun (Config, Set) ->
+                  Snapshot =
+                      maps:from_list(
+                        lists:filtermap(
+                          fun (Key) ->
+                                  case ns_config:search(Config, Key) of
+                                      {value, V} ->
+                                          {true, {Key, {V, no_revision}}};
+                                      false ->
+                                          false
+                                  end
+                          end, Keys)),
+                  case Fun(Snapshot) of
+                      {commit, List} ->
+                          {commit,
+                           lists:foldl(
+                             fun (Command, Acc) ->
+                                     {Key, Value} =
+                                         convert_command_to_legacy(Command),
+                                     Set(Key, Value, Acc)
+                             end, Config, List)};
+                      {abort, Error} ->
+                          {abort, Error}
+                  end
+          end),
+    case RV of
+        {commit, _} ->
+            {ok, no_revision};
+        {abort, Error} ->
+            Error;
+        retry_needed ->
+            erlang:error(exceeded_retries)
+    end.
