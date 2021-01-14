@@ -557,8 +557,13 @@ leave() ->
                    [RemoteNode]),
     %% Tell the remote server to tell everyone to shun me.
     rpc:cast(RemoteNode, ?MODULE, shun, [node()]),
-    %% Then drop ourselves into a leaving state.
-    leave_async().
+    case chronicle_compat:enabled() of
+        false ->
+            %% Then drop ourselves into a leaving state.
+            leave_async();
+        true ->
+            ok
+    end.
 
 force_eject_self() ->
     %% first send leave
@@ -577,7 +582,12 @@ leave(Node) ->
             leave();
         false ->
             %% Will never fail, but may not reach the destination
-            gen_server:cast({?MODULE, Node}, leave),
+            case chronicle_compat:enabled() of
+                false ->
+                    gen_server:cast({?MODULE, Node}, leave);
+                true ->
+                    ok
+            end,
             shun(Node)
     end.
 
