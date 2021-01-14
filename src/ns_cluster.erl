@@ -54,6 +54,7 @@
 -export([leave/0,
          leave/1,
          leave_async/0,
+         trigger_leave/0,
          force_eject_self/0,
          shun/1,
          start_link/0]).
@@ -419,7 +420,12 @@ handle_call({join_chronicle, Info}, _From,
     erlang:demonitor(MRef, [flush]),
     ?log_debug("Successfully joined cluster"),
 
-    {reply, ok, State#state{mref = undefined}}.
+    {reply, ok, State#state{mref = undefined}};
+
+handle_call(leave, _From, State) ->
+    misc:create_marker(leave_marker_path()),
+    leave_async(),
+    {reply, ok, State}.
 
 handle_cast(leave, State) ->
     ?cluster_log(0001, "Node ~p is leaving cluster.", [node()]),
@@ -594,6 +600,9 @@ leave(Node) ->
 %% @doc Just trigger the leave code; don't get another node to shun us.
 leave_async() ->
     gen_server:cast(?MODULE, leave).
+
+trigger_leave() ->
+    gen_server:call(?MODULE, leave, infinity).
 
 %% Note that shun does *not* cause the other node to reset its config!
 shun(RemoteNode) ->

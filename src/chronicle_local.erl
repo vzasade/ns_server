@@ -155,7 +155,7 @@ trigger_leave() ->
         true ->
             ?log_info("We detected that cluster removed us. "
                       "Trigger leave procedure."),
-            ns_cluster:leave_async();
+            ns_cluster:trigger_leave();
         false ->
             ok
     end.
