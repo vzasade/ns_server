@@ -244,6 +244,8 @@ should_move({service_failover_pending, _}) ->
     true;
 should_move(auto_reprovision_cfg) ->
     true;
+should_move(buckets_with_data) ->
+    true;
 should_move(_) ->
     false.
 
