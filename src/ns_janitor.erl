@@ -296,10 +296,11 @@ maybe_push_config(Bucket, BucketConfig, States, Options) ->
     maybe_config_sync(push, Bucket, BucketConfig, States, Options).
 
 cleanup_apply_config_body(Bucket, Servers, BucketConfig, Options) ->
-    ok = janitor_agent:apply_new_bucket_config(
-           Bucket, Servers, BucketConfig,
-           proplists:get_value(apply_config_timeout, Options,
-                               undefined_timeout)),
+    Timeout = proplists:get_value(apply_config_timeout, Options,
+                                  undefined_timeout),
+
+    Map = proplists:get_value(map, BucketConfig),
+    janitor_agent:apply_new_vbucket_map(Bucket, Map, Servers, Timeout),
 
     maybe_reset_rebalance_status(Options),
 

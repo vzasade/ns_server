@@ -48,7 +48,7 @@
          fetch_vbucket_states/2,
          find_vbucket_state/2,
          check_bucket_ready/3,
-         apply_new_bucket_config/4,
+         apply_new_vbucket_map/4,
          mark_bucket_warmed/2,
          delete_vbucket_copies/4,
          prepare_nodes_for_rebalance/3,
@@ -290,22 +290,44 @@ apply_new_bucket_config(Bucket, Servers, NewBucketConfig, undefined_timeout) ->
     apply_new_bucket_config(Bucket, Servers, NewBucketConfig,
                             ?APPLY_NEW_CONFIG_TIMEOUT);
 apply_new_bucket_config(Bucket, Servers, NewBucketConfig, Timeout) ->
+    Format = fun (Call, BC) ->
+                     case cluster_compat_mode:is_cluster_65() of
+                         true -> {Call, BC};
+                         false -> {Call, BC, []}
+                     end
+             end,
     functools:sequence_(
-      [?cut(call_on_servers(Bucket, Servers, NewBucketConfig,
-                            apply_new_config, Timeout)),
-       ?cut(call_on_servers(Bucket, Servers, NewBucketConfig,
-                            apply_new_config_replicas_phase, Timeout))]).
+      [?cut(call_on_servers(
+              Bucket, Servers, Format(apply_new_config, NewBucketConfig),
+              Timeout)),
+       ?cut(call_on_servers(
+              Bucket, Servers,
+              Format(apply_new_config_replicas_phase, NewBucketConfig),
+              Timeout))]).
 
-format_apply_new_config_call(Call, BucketConfig) ->
-    case cluster_compat_mode:is_cluster_65() of
-        true -> {Call, BucketConfig};
-        false -> {Call, BucketConfig, []}
+apply_new_vbucket_map(Bucket, Map, Servers, Timeout) ->
+    case cluster_compat_mode:is_cluster_cheshirecat() of
+        true ->
+            ok =
+                functools:sequence_(
+                  [?cut(call_on_servers(
+                          Bucket, Servers, {apply_new_map, Map, Servers},
+                          Timeout)),
+                   ?cut(call_on_servers(
+                          Bucket, Servers,
+                          {apply_new_map_replicas_phase, Map, Servers},
+                          Timeout))]);
+        false ->
+            BucketConfig = [{map, Map}, {servers, Servers}],
+            ok = apply_new_bucket_config(
+                   Bucket, Servers, BucketConfig, Timeout)
     end.
 
-call_on_servers(Bucket, Servers, BucketConfig, Call, Timeout) ->
-    CompleteCall = format_apply_new_config_call(Call, BucketConfig),
+call_on_servers(Bucket, Servers, Call, undefined_timeout) ->
+    call_on_servers(Bucket, Servers, Call, ?APPLY_NEW_CONFIG_TIMEOUT);
+call_on_servers(Bucket, Servers, Call, Timeout) ->
     Replies = misc:parallel_map(
-                ?cut({_1, catch call(Bucket, _1, CompleteCall, Timeout)}),
+                ?cut({_1, catch call(Bucket, _1, Call, Timeout)}),
                 Servers, infinity),
     BadReplies = [R || {_, RV} = R <- Replies, RV =/= ok],
     case BadReplies of
@@ -685,7 +707,12 @@ do_handle_call({apply_new_config,
     [] = IgnoredVBuckets,
     do_handle_call({apply_new_config, NewBucketConfig}, From, State);
 do_handle_call({apply_new_config, NewBucketConfig}, _From, State) ->
-    handle_apply_new_config(NewBucketConfig, State);
+    %% called on pre 7.0 clusters only
+    Map = proplists:get_value(map, NewBucketConfig),
+    true = (Map =/= undefined),
+    handle_apply_new_map(Map, ns_bucket:get_servers(NewBucketConfig), State);
+do_handle_call({apply_new_map, Map, Servers}, _From, State) ->
+    handle_apply_new_map(Map, Servers, State);
 do_handle_call({apply_new_config_replicas_phase,
                 NewBucketConfig, IgnoredVBuckets}, From, State) ->
     %% called on pre 6.5 clusters only
@@ -694,7 +721,13 @@ do_handle_call({apply_new_config_replicas_phase,
                    From, State);
 do_handle_call({apply_new_config_replicas_phase, NewBucketConfig},
                _From, State) ->
-    handle_apply_new_config_replicas_phase(NewBucketConfig, State);
+    %% called on pre 7.0 clusters only
+    Map = proplists:get_value(map, NewBucketConfig),
+    true = (Map =/= undefined),
+    handle_apply_new_map_replicas_phase(
+      Map, ns_bucket:get_servers(NewBucketConfig), State);
+do_handle_call({apply_new_map_replicas_phase, Map, Servers}, _From, State) ->
+    handle_apply_new_map_replicas_phase(Map, Servers, State);
 do_handle_call({wait_index_updated, VBucket}, From,
                #state{bucket_name = Bucket} = State) ->
     State2 = spawn_rebalance_subprocess(
@@ -1186,16 +1219,12 @@ stop_replications(Bucket, all) ->
 stop_replications(Bucket, VBs) ->
     replication_manager:teardown_replications(Bucket, VBs).
 
-handle_apply_new_config(NewBucketConfig, State) ->
-    check_for_node_rename(apply_new_config,
-                          NewBucketConfig, State,
-                          fun handle_apply_new_config/3).
+handle_apply_new_map(Map, Servers, State) ->
+    check_for_node_rename(apply_new_map, Servers, State,
+                          apply_new_map(_, Map, State)).
 
-handle_apply_new_config(Node, NewBucketConfig,
-                        #state{bucket_name = BucketName} = State) ->
+apply_new_map(Node, Map, #state{bucket_name = BucketName} = State) ->
     {ok, VBDetails} = get_state_and_topology(BucketName),
-    Map = proplists:get_value(map, NewBucketConfig),
-    true = (Map =/= undefined),
     {_, ToSet, ToDelete, NewWantedRev}
         = lists:foldl(
             fun (Chain, {VBucket, ToSet, ToDelete, PrevWanted}) ->
@@ -1273,16 +1302,12 @@ handle_apply_new_config(Node, NewBucketConfig,
 
     {reply, ok, pass_vbucket_states_to_set_view_manager(State2)}.
 
-handle_apply_new_config_replicas_phase(NewBucketConfig, State) ->
-    check_for_node_rename(apply_new_config_replicas_phase,
-                          NewBucketConfig, State,
-                          fun handle_apply_new_config_replicas_phase/3).
+handle_apply_new_map_replicas_phase(Map, Servers, State) ->
+    check_for_node_rename(apply_new_map_replicas_phase, Servers, State,
+                          apply_new_map_replicas_phase(_, Map, State)).
 
-handle_apply_new_config_replicas_phase(Node, NewBucketConfig,
-                                       #state{bucket_name =
-                                                  BucketName} = State) ->
-    Map = proplists:get_value(map, NewBucketConfig),
-    true = (Map =/= undefined),
+apply_new_map_replicas_phase(Node, Map,
+                             #state{bucket_name = BucketName} = State) ->
     WantedReplicas = [{Src, VBucket}
                       || {Src, Dst, VBucket} <- ns_bucket:map_to_replicas(Map),
                          Dst =:= Node],
@@ -1306,12 +1331,12 @@ handle_apply_new_config_replicas_phase(Node, NewBucketConfig,
 %% the handlers use the passed node name, everything should be fine.
 %%
 %% See https://issues.couchbase.com/browse/MB-34598 for more details.
-check_for_node_rename(Call, BucketConfig, State, Body) ->
+check_for_node_rename(Call, Servers, #state{bucket_name = BucketName} = State,
+                      Body) ->
     Node = node(),
-    Servers = ns_bucket:get_servers(BucketConfig),
     case lists:member(Node, Servers) of
         true ->
-            RV = Body(Node, BucketConfig, State),
+            RV = Body(Node),
 
             NewNode = node(),
             case NewNode =:= Node of
@@ -1321,15 +1346,16 @@ check_for_node_rename(Call, BucketConfig, State, Body) ->
                     ?log_info("Node name changed while handling ~p.~n"
                               "Old name: ~p.~n"
                               "New name: ~p.~n"
-                              "Bucket config:~n~p~n"
+                              "Bucket Name: ~p.~n"
+                              "Servers:~n~p~n"
                               "Result:~n~p",
-                              [Call, Node, NewNode, BucketConfig, RV])
+                              [Call, Node, NewNode, BucketName, Servers, RV])
             end,
 
             RV;
         false ->
             ?log_info("Detected node rename when handling ~p. "
-                      "Our name: ~p. Bucket server list: ~p",
-                      [Call, Node, Servers]),
+                      "Our name: ~p. Bucket name: ~p. Bucket server list: ~p",
+                      [Call, Node, BucketName, Servers]),
             {reply, {node_rename_detected, Node, Servers}, State}
     end.

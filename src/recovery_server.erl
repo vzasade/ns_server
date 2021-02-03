@@ -270,8 +270,9 @@ apply_recovery_bucket_config(Bucket, BucketConfig, Servers) ->
                                           Servers,
                                           ?RECOVERY_QUERY_STATES_TIMEOUT) of
         ready ->
-            janitor_agent:apply_new_bucket_config(
-              Bucket, Servers, BucketConfig, undefined_timeout);
+            Map = proplists:get_value(map, BucketConfig),
+            janitor_agent:apply_new_vbucket_map(Bucket, Map, Servers,
+                                                undefined_timeout);
         {_, Zombies} ->
             ?log_error("Failed to query states "
                        "from some of the nodes: ~p", [Zombies]),
