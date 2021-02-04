@@ -37,7 +37,7 @@
          disable/0,
          reset_count/0,
          reprovision_buckets/2,
-         get_cleanup_options/0,
+         get_cleanup_options/1,
          jsonify_cfg/0
         ]).
 
@@ -74,9 +74,14 @@ reprovision_buckets([], _UnsafeNodes) ->
 reprovision_buckets(Buckets, UnsafeNodes) ->
     call({reprovision_buckets, Buckets, UnsafeNodes}).
 
--spec get_cleanup_options() -> [term()].
-get_cleanup_options() ->
-    call(get_cleanup_options).
+-spec get_cleanup_options(list()) -> [term()].
+get_cleanup_options(BucketConfig) ->
+    case ns_bucket:storage_mode(BucketConfig) of
+        ephemeral ->
+            call(get_cleanup_options);
+        _ ->
+            []
+    end.
 
 call(Msg) ->
     misc:wait_for_global_name(?MODULE),

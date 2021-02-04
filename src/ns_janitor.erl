@@ -58,7 +58,7 @@ cleanup_membase_bucket(Bucket, Options, BucketConfig, Snapshot) ->
     %% auto-reprovisioning settings for ephemeral buckets. That is, we do not
     %% want to simply activate any bucket on a restarted node and lose the data
     %% instead of promoting the replicas.
-    AllOptions = Options ++ auto_reprovision:get_cleanup_options(),
+    AllOptions = Options ++ auto_reprovision:get_cleanup_options(BucketConfig),
     {ok, RV} =
         leader_activities:run_activity(
           {ns_janitor, Bucket, cleanup}, majority,
@@ -92,11 +92,11 @@ update_servers(Bucket, Servers, Options) ->
     push_config(Options).
 
 cleanup_with_membase_bucket_check_map(Bucket, Options, BucketConfig) ->
+    Servers = ns_bucket:get_servers(BucketConfig),
+    true = (Servers =/= []),
+
     case proplists:get_value(map, BucketConfig, []) of
         [] ->
-            Servers = ns_bucket:get_servers(BucketConfig),
-            true = (Servers =/= []),
-
             ?log_info("janitor decided to generate initial vbucket map"),
             {Map, MapOpts} = ns_rebalancer:generate_initial_map(BucketConfig),
             set_initial_map(Map, MapOpts, Bucket, BucketConfig, Options),
@@ -104,7 +104,7 @@ cleanup_with_membase_bucket_check_map(Bucket, Options, BucketConfig) ->
             cleanup(Bucket, Options);
         Map ->
             cleanup_with_membase_bucket_vbucket_map(
-              Bucket, Options, BucketConfig, Map)
+              Bucket, Options, Map, Servers)
     end.
 
 set_initial_map(Map, MapOpts, Bucket, BucketConfig, Options) ->
@@ -120,31 +120,27 @@ set_initial_map(Map, MapOpts, Bucket, BucketConfig, Options) ->
 
     push_config(Options).
 
-cleanup_with_membase_bucket_vbucket_map(Bucket, Options, BucketConfig, Map) ->
-    Servers = ns_bucket:get_servers(BucketConfig),
-    true = (Servers =/= []),
+cleanup_with_membase_bucket_vbucket_map(Bucket, Options, Map, Servers) ->
     Timeout = proplists:get_value(query_states_timeout, Options),
     Opts = [{timeout, Timeout} || Timeout =/= undefined],
     case janitor_agent:query_vbuckets(Bucket, Servers, [], Opts) of
         {States, []} ->
-            cleanup_with_states(Bucket, Options, BucketConfig, Map,
-                                Servers, States);
+            cleanup_with_states(Bucket, Options, Map, Servers, States);
         {_States, Zombies} ->
             ?log_info("Bucket ~p not yet ready on ~p", [Bucket, Zombies]),
             {error, wait_for_memcached_failed, Zombies}
     end.
 
-cleanup_with_states(Bucket, Options, BucketConfig, Map, Servers, States) ->
+cleanup_with_states(Bucket, Options, Map, Servers, States) ->
     case maybe_fixup_vbucket_map(Bucket, Map, States, Options) of
         {ok, NewMap} ->
             cleanup_check_unsafe_nodes(
-              Bucket, Options, BucketConfig, NewMap, Servers, States);
+              Bucket, Options, NewMap, Servers, States);
         Error ->
             Error
     end.
 
-cleanup_check_unsafe_nodes(Bucket, Options, BucketConfig, Map, Servers,
-                           States) ->
+cleanup_check_unsafe_nodes(Bucket, Options, Map, Servers, States) ->
     %% Find all the unsafe nodes (nodes on which memcached restarted within
     %% the auto-failover timeout) using the vbucket states. If atleast one
     %% unsafe node is found then we won't bring the bucket online until we
@@ -152,7 +148,7 @@ cleanup_check_unsafe_nodes(Bucket, Options, BucketConfig, Map, Servers,
     %% the end of every janitor run.
     UnsafeNodes = find_unsafe_nodes_with_vbucket_states(
                     Map, States,
-                    should_check_for_unsafe_nodes(BucketConfig, Options)),
+                    proplists:get_bool(check_for_unsafe_nodes, Options)),
 
     case UnsafeNodes =/= [] of
         true ->
@@ -302,10 +298,6 @@ do_apply_vbucket_map(Bucket, Map, Servers, Options) ->
                        "~nBadReplies:~n~p", [Bucket, BadReplies]),
             {error, marking_as_warmed_failed, [N || {N, _} <- BadReplies]}
     end.
-
-should_check_for_unsafe_nodes(BCfg, Options) ->
-    proplists:get_bool(check_for_unsafe_nodes, Options) andalso
-        ns_bucket:storage_mode(BCfg) =:= ephemeral.
 
 find_unsafe_nodes_with_vbucket_states(_Map, _States, false) ->
     [];
