@@ -1043,9 +1043,10 @@ apply_delta_recovery_buckets(DeltaRecoveryBuckets, DeltaNodes, CurrentBuckets) -
     ok = check_test_condition(apply_delta_recovery),
     lists:foreach(
       fun ({Bucket, BucketConfig}) ->
+              Map = proplists:get_value(map, BucketConfig),
               ok = wait_for_bucket(Bucket, DeltaNodes),
-              ok = ns_janitor:cleanup_apply_config(
-                     Bucket, DeltaNodes, BucketConfig,
+              ok = ns_janitor:apply_vbucket_map(
+                     Bucket, Map, DeltaNodes,
                      [{apply_config_timeout, ?REBALANCER_APPLY_CONFIG_TIMEOUT}])
       end, TransitionalBuckets),
 

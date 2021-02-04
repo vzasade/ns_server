@@ -25,7 +25,7 @@
 -endif.
 
 -export([cleanup/2,
-         cleanup_apply_config/4,
+         apply_vbucket_map/4,
          check_server_list/2]).
 
 -spec cleanup(Bucket::bucket_name(), Options::list()) ->
@@ -102,8 +102,9 @@ cleanup_with_membase_bucket_check_map(Bucket, Options, BucketConfig) ->
             set_initial_map(Map, MapOpts, Bucket, BucketConfig, Options),
 
             cleanup(Bucket, Options);
-        _ ->
-            cleanup_with_membase_bucket_vbucket_map(Bucket, Options, BucketConfig)
+        Map ->
+            cleanup_with_membase_bucket_vbucket_map(
+              Bucket, Options, BucketConfig, Map)
     end.
 
 set_initial_map(Map, MapOpts, Bucket, BucketConfig, Options) ->
@@ -119,64 +120,69 @@ set_initial_map(Map, MapOpts, Bucket, BucketConfig, Options) ->
 
     push_config(Options).
 
-cleanup_with_membase_bucket_vbucket_map(Bucket, Options, BucketConfig) ->
+cleanup_with_membase_bucket_vbucket_map(Bucket, Options, BucketConfig, Map) ->
     Servers = ns_bucket:get_servers(BucketConfig),
     true = (Servers =/= []),
     Timeout = proplists:get_value(query_states_timeout, Options),
     Opts = [{timeout, Timeout} || Timeout =/= undefined],
     case janitor_agent:query_vbuckets(Bucket, Servers, [], Opts) of
         {States, []} ->
-            cleanup_with_states(Bucket, Options, BucketConfig, Servers, States);
+            cleanup_with_states(Bucket, Options, BucketConfig, Map,
+                                Servers, States);
         {_States, Zombies} ->
             ?log_info("Bucket ~p not yet ready on ~p", [Bucket, Zombies]),
             {error, wait_for_memcached_failed, Zombies}
     end.
 
-cleanup_with_states(Bucket, Options, BucketConfig, Servers, States) ->
-    case maybe_fixup_vbucket_map(Bucket, BucketConfig, States, Options) of
-        {ok, NewBucketConfig} ->
-            cleanup_check_unsafe_nodes(Bucket, Options,
-                                       NewBucketConfig, Servers, States);
+cleanup_with_states(Bucket, Options, BucketConfig, Map, Servers, States) ->
+    case maybe_fixup_vbucket_map(Bucket, Map, States, Options) of
+        {ok, NewMap} ->
+            cleanup_check_unsafe_nodes(
+              Bucket, Options, BucketConfig, NewMap, Servers, States);
         Error ->
             Error
     end.
 
-cleanup_check_unsafe_nodes(Bucket, Options, BucketConfig, Servers, States) ->
+cleanup_check_unsafe_nodes(Bucket, Options, BucketConfig, Map, Servers,
+                           States) ->
     %% Find all the unsafe nodes (nodes on which memcached restarted within
     %% the auto-failover timeout) using the vbucket states. If atleast one
     %% unsafe node is found then we won't bring the bucket online until we
     %% we reprovision it. Reprovisioning is initiated by the orchestrator at
     %% the end of every janitor run.
     UnsafeNodes = find_unsafe_nodes_with_vbucket_states(
-                    BucketConfig, States,
+                    Map, States,
                     should_check_for_unsafe_nodes(BucketConfig, Options)),
 
     case UnsafeNodes =/= [] of
         true ->
             {error, unsafe_nodes, UnsafeNodes};
         false ->
-            cleanup_apply_config(Bucket, Servers, BucketConfig, Options)
+            apply_vbucket_map(Bucket, Map, Servers, Options)
     end.
 
-maybe_fixup_vbucket_map(Bucket, BucketConfig, States, Options) ->
+maybe_fixup_vbucket_map(Bucket, Map, States, Options) ->
     try
-        NewBucketConfig = maybe_pull_config(Bucket,
-                                            BucketConfig, States, Options),
+        maybe_config_sync(pull, Bucket, Map, States, Options),
 
-        case do_maybe_fixup_vbucket_map(Bucket, NewBucketConfig, States) of
+        {ok, NewBucketConfig} = ns_bucket:get_bucket(Bucket),
+        NewMap = proplists:get_value(map, NewBucketConfig),
+
+        case do_maybe_fixup_vbucket_map(Bucket, NewBucketConfig,
+                                        NewMap, States) of
             not_needed ->
                 %% We decided not to update the bucket config. It still may be
                 %% the case that some nodes have extra vbuckets. Before
                 %% deleting those, we need to push the config, so all nodes
                 %% are on the same page.
-                maybe_push_config(Bucket, NewBucketConfig, States, Options),
-                {ok, NewBucketConfig};
-            {ok, FixedBucketConfig} ->
+                maybe_config_sync(push, Bucket, NewMap, States, Options),
+                {ok, NewMap};
+            {ok, FixedMap} ->
                 %% We decided to fix the bucket config. In this case we push
                 %% the config no matter what, i.e. even if durability
                 %% awareness is disabled.
                 push_config(Options),
-                {ok, FixedBucketConfig};
+                {ok, FixedMap};
             FixupError ->
                 FixupError
         end
@@ -185,39 +191,33 @@ maybe_fixup_vbucket_map(Bucket, BucketConfig, States, Options) ->
             Error
     end.
 
-do_maybe_fixup_vbucket_map(Bucket, BucketConfig, States) ->
-    {NewBucketConfig, IgnoredVBuckets} = compute_vbucket_map_fixup(Bucket,
-                                                                   BucketConfig,
-                                                                   States),
+do_maybe_fixup_vbucket_map(Bucket, BucketConfig, Map, States) ->
+    {NewMap, IgnoredVBuckets} =
+        compute_vbucket_map_fixup(Bucket, BucketConfig, Map, States),
     case IgnoredVBuckets of
         [] ->
-            case NewBucketConfig =:= BucketConfig of
+            case NewMap =:= Map of
                 true ->
                     not_needed;
                 false ->
-                    fixup_vbucket_map(Bucket, BucketConfig,
-                                      NewBucketConfig, States),
-                    {ok, NewBucketConfig}
+                    ?log_info("Janitor is going to change "
+                              "vbucket map for bucket ~p", [Bucket]),
+                    ?log_info("VBucket states:~n~p", [dict:to_list(States)]),
+                    ?log_info("Old bucket map:~n~p", [Map]),
+
+                    ok = ns_bucket:set_map(Bucket, NewMap),
+                    {ok, NewMap}
             end;
         _ when is_list(IgnoredVBuckets) ->
             {error, {bad_vbuckets, IgnoredVBuckets}}
     end.
 
-fixup_vbucket_map(Bucket, BucketConfig, NewBucketConfig, States) ->
-    ?log_info("Janitor is going to change "
-              "bucket config for bucket ~p", [Bucket]),
-    ?log_info("VBucket states:~n~p", [dict:to_list(States)]),
-    ?log_info("Old bucket config:~n~p", [BucketConfig]),
-
-    ok = ns_bucket:set_bucket_config(Bucket, NewBucketConfig).
-
-cleanup_apply_config(Bucket, Servers, BucketConfig, Options) ->
+apply_vbucket_map(Bucket, Map, Servers, Options) ->
     {ok, Result} =
         leader_activities:run_activity(
           {ns_janitor, Bucket, apply_config}, {all, Servers},
           fun () ->
-                  {ok, cleanup_apply_config_body(Bucket, Servers,
-                                                 BucketConfig, Options)}
+                  {ok, do_apply_vbucket_map(Bucket, Map, Servers, Options)}
           end,
           [quiet]),
 
@@ -231,12 +231,11 @@ config_sync_nodes(Options) ->
             Nodes
     end.
 
-maybe_config_sync(Type, Bucket, BucketConfig, States, Options) ->
+maybe_config_sync(Type, Bucket, Map, States, Options) ->
     Flag = config_sync_type_to_flag(Type),
     case proplists:get_value(Flag, Options, true)
         andalso cluster_compat_mode:preserve_durable_mutations() of
         true ->
-            {_, Map} = lists:keyfind(map, 1, BucketConfig),
             case map_matches_states_exactly(Map, States) of
                 true ->
                     ok;
@@ -287,19 +286,10 @@ do_config_sync(ns_config, push, Nodes, Timeout) ->
     ns_config_rep:push_keys([buckets]),
     ns_config_rep:ensure_config_seen_by_nodes(Nodes, Timeout).
 
-maybe_pull_config(Bucket, BucketConfig, States, Options) ->
-    maybe_config_sync(pull, Bucket, BucketConfig, States, Options),
-    {ok, NewBucketConfig} = ns_bucket:get_bucket(Bucket),
-    NewBucketConfig.
-
-maybe_push_config(Bucket, BucketConfig, States, Options) ->
-    maybe_config_sync(push, Bucket, BucketConfig, States, Options).
-
-cleanup_apply_config_body(Bucket, Servers, BucketConfig, Options) ->
+do_apply_vbucket_map(Bucket, Map, Servers, Options) ->
     Timeout = proplists:get_value(apply_config_timeout, Options,
                                   undefined_timeout),
 
-    Map = proplists:get_value(map, BucketConfig),
     janitor_agent:apply_new_vbucket_map(Bucket, Map, Servers, Timeout),
 
     maybe_reset_rebalance_status(Options),
@@ -317,11 +307,9 @@ should_check_for_unsafe_nodes(BCfg, Options) ->
     proplists:get_bool(check_for_unsafe_nodes, Options) andalso
         ns_bucket:storage_mode(BCfg) =:= ephemeral.
 
-find_unsafe_nodes_with_vbucket_states(_BucketConfig, _States, false) ->
+find_unsafe_nodes_with_vbucket_states(_Map, _States, false) ->
     [];
-find_unsafe_nodes_with_vbucket_states(BucketConfig, States, true) ->
-    Map = proplists:get_value(map, BucketConfig, []),
-    true = (Map =/= []),
+find_unsafe_nodes_with_vbucket_states(Map, States, true) when Map =/= [] ->
     EnumeratedChains = misc:enumerate(Map, 0),
 
     lists:foldl(
@@ -419,9 +407,7 @@ do_check_server_list(Bucket, Servers, ActiveKVNodes) when is_list(Servers) ->
             {error, {corrupted_server_list, Servers, ActiveKVNodes}}
     end.
 
-compute_vbucket_map_fixup(Bucket, BucketConfig, States) ->
-    Map = proplists:get_value(map, BucketConfig, []),
-    true = ([] =/= Map),
+compute_vbucket_map_fixup(Bucket, BucketConfig, Map, States) when Map =/= [] ->
     FFMap = proplists:get_value(fastForwardMap, BucketConfig),
 
     EnumeratedChains = mb_map:enumerate_chains(Map, FFMap),
@@ -446,15 +432,7 @@ compute_vbucket_map_fixup(Bucket, BucketConfig, States) ->
                              NumReplicas = ns_bucket:num_replicas(BucketConfig),
                              mb_map:align_replicas(Map, NumReplicas)
                      end,
-    NewBucketConfig = case NewAdjustedMap =:= Map of
-                          true ->
-                              BucketConfig;
-                          false ->
-                              ?log_debug("Janitor decided to update vbucket map"),
-                              lists:keyreplace(map, 1, BucketConfig,
-                                               {map, NewAdjustedMap})
-                      end,
-    {NewBucketConfig, IgnoredVBuckets}.
+    {NewAdjustedMap, IgnoredVBuckets}.
 
 %% this will decide what vbucket map chain is right for this vbucket
 sanify_chain(_Bucket, _States,
