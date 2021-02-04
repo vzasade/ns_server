@@ -174,7 +174,12 @@ key_filter() ->
             [{chronicle, fun (bucket_names) ->
                                  true;
                              (Key) ->
-                                 sub_key_match(Key) =/= false
+                                 case sub_key_match(Key) of
+                                     {true, Bucket, props} ->
+                                         {true, bucket_to_chronicle(Bucket, _)};
+                                     _ ->
+                                         sub_key_match(Key) =/= false
+                                 end
                          end}]
     end.
 
@@ -184,8 +189,15 @@ key_filter(Bucket) ->
             [{ns_config, ns_config_key_filter()} |
              collections:key_filter(Bucket)];
         chronicle ->
-            [{chronicle, [root(), sub_key(Bucket, props),
-                          collections:key(Bucket)]}]
+            [{chronicle, [root(), collections:key(Bucket)]},
+             {chronicle, fun (Key) ->
+                                 case sub_key_match(Key) of
+                                     {true, Bucket, props} ->
+                                         {true, bucket_to_chronicle(Bucket, _)};
+                                     _ ->
+                                         false
+                                 end
+                         end}]
     end.
 
 ns_config_key_filter() ->
@@ -204,8 +216,20 @@ buckets_to_chronicle(Buckets) ->
     bucket_configs_to_chronicle(proplists:get_value(configs, Buckets, [])).
 
 bucket_configs_to_chronicle(BucketConfigs) ->
-    [{root(), [N || {N, _} <- BucketConfigs]} |
-     [{sub_key(B, props), BC} || {B, BC} <- BucketConfigs]].
+    lists:flatten(
+      [{root(), [N || {N, _} <- BucketConfigs]} |
+       [bucket_to_chronicle(B, BC) || {B, BC} <- BucketConfigs]]).
+
+bucket_to_chronicle(B, BC) ->
+    [{sub_key(B, props), BC} | split_vbucket_map(B, BC)].
+
+split_vbucket_map(B, BC) ->
+    case vbucket_map:get_from_config(BC, undefined) of
+        undefined ->
+            [];
+        Map ->
+            [{vbucket_map:key(B), Map}]
+    end.
 
 remove_from_snapshot(BucketName, Snapshot) ->
     functools:chain(
