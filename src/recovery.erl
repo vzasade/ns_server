@@ -21,32 +21,34 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--export([start_recovery/1,
+-export([start_recovery/2,
          get_recovery_map/1, commit_vbucket/2, note_commit_vbucket_done/2,
          is_recovery_complete/1]).
 
--record(state, {bucket_config :: list(),
-                recovery_map :: dict:dict(),
+-record(state, {recovery_map :: dict:dict(),
                 post_recovery_chains :: dict:dict(),
                 apply_map :: array:array(),
                 effective_map :: array:array()}).
 
--spec start_recovery(BucketConfig) ->
-                            {ok, RecoveryMap, {Servers, BucketConfig}, #state{}}
+-spec start_recovery(Map, BucketConfig) ->
+                            {ok, RecoveryMap, {Servers, NewMap}, #state{}}
                                 | not_needed
-  when BucketConfig :: list(),
-       RecoveryMap :: dict:dict(),
-       Servers :: [node()].
-start_recovery(BucketConfig) ->
+                                when Map :: undefined | list(),
+                                     BucketConfig :: list(),
+                                     NewMap :: list(),
+                                     RecoveryMap :: dict:dict(),
+                                     Servers :: [node()].
+start_recovery(Map, BucketConfig) ->
     NumVBuckets = proplists:get_value(num_vbuckets, BucketConfig),
     true = is_integer(NumVBuckets),
 
     NumReplicas = ns_bucket:num_replicas(BucketConfig),
 
     OldMap =
-        case proplists:get_value(map, BucketConfig) of
+        case Map of
             undefined ->
-                lists:duplicate(NumVBuckets, lists:duplicate(NumReplicas + 1, undefined));
+                lists:duplicate(NumVBuckets,
+                                lists:duplicate(NumReplicas + 1, undefined));
             V ->
                 V
         end,
@@ -59,7 +61,8 @@ start_recovery(BucketConfig) ->
         [] ->
             not_needed;
         _ ->
-            RecoveryMap0 = compute_recovery_map(OldMap, Servers, NumVBuckets, MissingVBuckets),
+            RecoveryMap0 = compute_recovery_map(OldMap, Servers, NumVBuckets,
+                                                MissingVBuckets),
             RecoveryMap = dict:from_list(RecoveryMap0),
 
             PostRecoveryChains =
@@ -68,7 +71,8 @@ start_recovery(BucketConfig) ->
                           lists:foldl(
                             fun (VBucket, Acc1) ->
                                     Chain = [Node |
-                                             lists:duplicate(NumReplicas, undefined)],
+                                             lists:duplicate(
+                                               NumReplicas, undefined)],
                                     dict:store(VBucket, Chain, Acc1)
                             end, Acc, VBuckets)
                   end, dict:new(), RecoveryMap0),
@@ -84,12 +88,8 @@ start_recovery(BucketConfig) ->
                           [Chain | Acc]
                   end, [], misc:enumerate(OldMap, 0)),
 
-            NewBucketConfig = misc:update_proplist(BucketConfig,
-                                                   [{map, ApplyMap}]),
-
-            {ok, RecoveryMap, {Servers, NewBucketConfig},
-             #state{bucket_config=BucketConfig,
-                    recovery_map=RecoveryMap,
+            {ok, RecoveryMap, {Servers, ApplyMap},
+             #state{recovery_map=RecoveryMap,
                     post_recovery_chains=PostRecoveryChains,
                     apply_map=array:from_list(ApplyMap),
                     effective_map=array:from_list(OldMap)}}
@@ -100,21 +100,18 @@ get_recovery_map(#state{recovery_map=RecoveryMap}) ->
     RecoveryMap.
 
 -spec commit_vbucket(vbucket_id(), #state{}) ->
-                            {ok, {Servers, BucketConfig}, #state{}}
+                            {ok, {Servers, NewMap}, #state{}}
                                 | vbucket_not_found
   when Servers :: [node()],
-       BucketConfig :: list().
+       NewMap :: list().
 commit_vbucket(VBucket,
-               #state{bucket_config=BucketConfig,
-                      post_recovery_chains=Chains,
+               #state{post_recovery_chains=Chains,
                       apply_map=ApplyMap} = State) ->
     case dict:find(VBucket, Chains) of
         {ok, Chain} ->
-            ApplyMap1 = array:to_list(array:set(VBucket, Chain, ApplyMap)),
-            NewBucketConfig = misc:update_proplist(BucketConfig,
-                                                   [{map, ApplyMap1}]),
+            ApplyMapAsList = array:to_list(array:set(VBucket, Chain, ApplyMap)),
             Servers = [S || S <- Chain, S =/= undefined],
-            {ok, {Servers, NewBucketConfig}, State};
+            {ok, {Servers, ApplyMapAsList}, State};
         error ->
             vbucket_not_found
     end.

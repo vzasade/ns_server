@@ -119,8 +119,8 @@ handle_commit_vbucket(VBucket,
                       #state{bucket         = Bucket,
                              recovery_state = RecoveryState} = State) ->
     case recovery:commit_vbucket(VBucket, RecoveryState) of
-        {ok, {Servers, NewBucketConfig}, NewRecoveryState} ->
-            RV = apply_recovery_bucket_config(Bucket, NewBucketConfig, Servers),
+        {ok, {Servers, NewMap}, NewRecoveryState} ->
+            RV = apply_recovery_bucket_config(Bucket, NewMap, Servers),
             case RV of
                 ok ->
                     handle_commit_vbucket_post_apply(Bucket, VBucket,
@@ -170,8 +170,8 @@ handle_start_recovery(Bucket, FromPid) ->
 
         sync_config(KVServers, FromPid),
         cleanup_old_buckets(KVServers),
-        BucketConfig = prepare_bucket(Bucket, KVServers),
-        complete_start_recovery(Bucket, BucketConfig, KVServers)
+        {BucketConfig, Map} = prepare_bucket(Bucket, KVServers),
+        complete_start_recovery(Bucket, BucketConfig, Map, KVServers)
     catch
         throw:Error ->
             {stop, normal, Error, undefined}
@@ -227,26 +227,27 @@ prepare_bucket(Bucket, Servers) ->
     case ns_janitor:cleanup(Bucket, [{query_states_timeout, 10000}]) of
         ok ->
             {ok, BucketConfig} = ns_bucket:get_bucket(Bucket),
-            BucketConfig;
+            Map = proplists:get_value(map, BucketConfig),
+            {BucketConfig, Map};
         {error, _, FailedNodes} ->
             throw({error, {failed_nodes, FailedNodes}});
         {error, OtherError} ->
             throw({error, {janitor_error, OtherError}})
     end.
 
-init_recovery_state(Servers, BucketConfig) ->
-    case recovery:start_recovery(BucketConfig) of
-        {ok, Map, {NewServers, NewBucketConfig}, RecoveryState} ->
+init_recovery_state(Map, Servers, BucketConfig) ->
+    case recovery:start_recovery(Map, BucketConfig) of
+        {ok, RecoveryMap, {NewServers, NewMap}, RecoveryState} ->
             true = (NewServers =:= Servers),
-            {Map, NewBucketConfig, RecoveryState};
+            {RecoveryMap, NewMap, RecoveryState};
         Error ->
             throw(Error)
     end.
 
-complete_start_recovery(Bucket, BucketConfig, Servers) ->
-    {Map, NewBucketConfig, RecoveryState} =
-        init_recovery_state(Servers, BucketConfig),
-    RV = apply_recovery_bucket_config(Bucket, NewBucketConfig, Servers),
+complete_start_recovery(Bucket, BucketConfig, Map, Servers) ->
+    {RecoveryMap, NewMap, RecoveryState} =
+        init_recovery_state(Map, Servers, BucketConfig),
+    RV = apply_recovery_bucket_config(Bucket, NewMap, Servers),
 
     case RV of
         ok ->
@@ -260,17 +261,16 @@ complete_start_recovery(Bucket, BucketConfig, Servers) ->
                            uuid           = UUID,
                            recovery_state = RecoveryState},
 
-            {reply, {ok, self(), UUID, Map}, State};
+            {reply, {ok, self(), UUID, RecoveryMap}, State};
         Error ->
             throw(Error)
     end.
 
-apply_recovery_bucket_config(Bucket, BucketConfig, Servers) ->
+apply_recovery_bucket_config(Bucket, Map, Servers) ->
     case janitor_agent:check_bucket_ready(Bucket,
                                           Servers,
                                           ?RECOVERY_QUERY_STATES_TIMEOUT) of
         ready ->
-            Map = proplists:get_value(map, BucketConfig),
             janitor_agent:apply_new_vbucket_map(Bucket, Map, Servers,
                                                 undefined_timeout);
         {_, Zombies} ->
