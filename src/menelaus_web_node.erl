@@ -171,6 +171,7 @@ build_node_status(Node, Bucket, InfoNode, BucketsAll) ->
 
 get_snapshot() ->
     chronicle_compat:get_snapshot([ns_bucket:key_filter(),
+                                   vbucket_map:key_filter(),
                                    ns_cluster_membership:key_filter()]).
 
 build_nodes_info_fun(CanIncludeOtpCookie, InfoLevel, Stability, LocalAddr) ->
@@ -227,9 +228,9 @@ build_replication_info(Bucket, WantENode, NodeStatuses, Snapshot) ->
     {replication,
      case ns_bucket:get_bucket(Bucket, Snapshot) of
          not_present -> 0.0;
-         {ok, BucketConfig} ->
+         {ok, _} ->
              failover_safeness_level:extract_replication_uptodateness(
-               Bucket, BucketConfig, WantENode, NodeStatuses)
+               Bucket, Snapshot, WantENode, NodeStatuses)
      end}.
 
 build_extra_node_info(Config, Node, InfoNode) ->
@@ -453,20 +454,11 @@ handle_bucket_node_info(BucketName, Hostname, Req) ->
                                  {stats, {struct, [{uri, NodeStatsURI}]}}]})
     end.
 
-average_failover_safenesses(Node, NodeInfos, BucketsAll) ->
-    average_failover_safenesses_rec(Node, NodeInfos, BucketsAll, 0, 0).
-
-average_failover_safenesses_rec(_Node, _NodeInfos, [], Sum, Count) ->
-    try Sum / Count
-    catch error:badarith -> 1.0
-    end;
-average_failover_safenesses_rec(Node, NodeInfos,
-                                [{BucketName, BucketConfig} | RestBuckets],
-                                Sum, Count) ->
-    Level = failover_safeness_level:extract_replication_uptodateness(
-              BucketName, BucketConfig, Node, NodeInfos),
-    average_failover_safenesses_rec(Node, NodeInfos, RestBuckets, Sum + Level,
-                                    Count + 1).
+average_failover_safeness(Node, NodeInfos, Snapshot) ->
+    Levels = [failover_safeness_level:extract_replication_uptodateness(
+                B, Snapshot, Node, NodeInfos) ||
+                 B <- ns_bucket:get_bucket_names(Snapshot)],
+    misc:average(Levels).
 
 %% this serves fresh nodes replication and health status
 handle_node_statuses(Req) ->
@@ -490,8 +482,8 @@ handle_node_statuses(Req) ->
                                         {otpNode, N},
                                         {dataless, Dataless},
                                         {replication,
-                                         average_failover_safenesses(
-                                           N, OldStatuses, BucketsAll)}]};
+                                         average_failover_safeness(
+                                           N, OldStatuses, Snapshot)}]};
                           false ->
                               {struct,
                                [{status, healthy},
@@ -499,8 +491,8 @@ handle_node_statuses(Req) ->
                                  graceful_failover_possible(N, BucketsAll)},
                                 {otpNode, N},
                                 {dataless, Dataless},
-                                {replication, average_failover_safenesses(
-                                                N, FreshStatuses, BucketsAll)}]}
+                                {replication, average_failover_safeness(
+                                                N, FreshStatuses, Snapshot)}]}
                       end,
                   {build_node_hostname(Config, N, LocalAddr), V}
           end, ns_node_disco:nodes_wanted(Snapshot)),

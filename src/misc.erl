@@ -3064,3 +3064,13 @@ bin_part_near_test() ->
     ?assertEqual(<<"...56789">>,    bin_part_near(<<"0123456789">>, 10, 5)),
     ?assertEqual(<<"...56789">>,    bin_part_near(<<"0123456789">>, 11, 5)).
 -endif.
+
+average([]) ->
+    1.0;
+average(Numbers) ->
+    {Sum, Count} =
+        lists:foldl(
+          fun (N, {AccSum, AccCount}) ->
+                  {AccSum + N, AccCount + 1}
+          end, {0, 0}, Numbers),
+    Sum / Count.

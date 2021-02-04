@@ -209,8 +209,8 @@ build_local_safeness_info(BucketNames) ->
 %% date (see discussion of green/yellow levels at top of this
 %% file). So we actually use node statuses of all nodes (well, only
 %% replicas of given node in fact).
-extract_replication_uptodateness(BucketName, BucketConfig, Node, NodeStatuses) ->
-    Map = proplists:get_value(map, BucketConfig, []),
+extract_replication_uptodateness(BucketName, Snapshot, Node, NodeStatuses) ->
+    Map = vbucket_map:get_with_default(BucketName, Snapshot),
     case outgoing_replications_started(BucketName, Map, Node, NodeStatuses) of
         false ->
             0.0;
