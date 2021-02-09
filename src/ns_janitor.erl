@@ -40,6 +40,7 @@
 cleanup(Bucket, Options) ->
     Snapshot = chronicle_compat:get_snapshot(
                  [ns_bucket:key_filter(Bucket),
+                  vbucket_map:key_filter(Bucket),
                   ns_cluster_membership:key_filter()]),
     case ns_bucket:get_bucket(Bucket, Snapshot) of
         not_present ->
@@ -76,7 +77,8 @@ cleanup_with_membase_bucket_check_servers(Bucket, Options, BucketConfig,
                                           Snapshot) ->
     case check_server_list(Bucket, BucketConfig, Snapshot) of
         ok ->
-            cleanup_with_membase_bucket_check_map(Bucket, Options, BucketConfig);
+            cleanup_with_membase_bucket_check_map(
+              Bucket, Options, BucketConfig, Snapshot);
         {update_servers, NewServers} ->
             update_servers(Bucket, NewServers, Options),
             cleanup(Bucket, Options);
@@ -91,11 +93,12 @@ update_servers(Bucket, Servers, Options) ->
     ns_bucket:set_servers(Bucket, Servers),
     push_config(Options).
 
-cleanup_with_membase_bucket_check_map(Bucket, Options, BucketConfig) ->
+cleanup_with_membase_bucket_check_map(Bucket, Options, BucketConfig,
+                                      Snapshot) ->
     Servers = ns_bucket:get_servers(BucketConfig),
     true = (Servers =/= []),
 
-    case proplists:get_value(map, BucketConfig, []) of
+    case vbucket_map:get_with_default(Bucket, Snapshot) of
         [] ->
             ?log_info("janitor decided to generate initial vbucket map"),
             {Map, MapOpts} = ns_rebalancer:generate_initial_map(BucketConfig),
@@ -161,8 +164,12 @@ maybe_fixup_vbucket_map(Bucket, Map, States, Options) ->
     try
         maybe_config_sync(pull, Bucket, Map, States, Options),
 
-        {ok, NewBucketConfig} = ns_bucket:get_bucket(Bucket),
-        NewMap = proplists:get_value(map, NewBucketConfig),
+        Snapshot = chronicle_compat:get_snapshot(
+                     [ns_bucket:key_filter(Bucket),
+                      vbucket_map:key_filter(Bucket)]),
+
+        {ok, NewBucketConfig} = ns_bucket:get_bucket(Bucket, Snapshot),
+        NewMap = vbucket_map:get(Bucket, Snapshot),
 
         case do_maybe_fixup_vbucket_map(Bucket, NewBucketConfig,
                                         NewMap, States) of

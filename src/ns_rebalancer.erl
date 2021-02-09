@@ -56,26 +56,31 @@
 %% API
 %%
 validate_autofailover(Nodes) ->
-    case ns_cluster_membership:service_nodes(Nodes, kv) of
+    Snapshot =
+        chronicle_compat:get_snapshot([ns_bucket:key_filter(),
+                                       vbucket_map:key_filter(),
+                                       ns_cluster_membership:key_filter()]),
+
+    case ns_cluster_membership:service_nodes(Snapshot, Nodes, kv) of
         [] ->
             ok;
         KVNodes ->
-            BucketPairs = ns_bucket:get_buckets(),
+            BucketPairs = ns_bucket:get_buckets(Snapshot),
             UnsafeBuckets =
                 [BucketName
                  || {BucketName, BucketConfig} <- BucketPairs,
-                    validate_autofailover_bucket(BucketConfig, KVNodes)
-                        =:= false],
+                    validate_autofailover_bucket(BucketName, BucketConfig,
+                                                 KVNodes, Snapshot) =:= false],
             case UnsafeBuckets of
                 [] -> ok;
                 _ -> {error, UnsafeBuckets}
             end
     end.
 
-validate_autofailover_bucket(BucketConfig, Nodes) ->
+validate_autofailover_bucket(BucketName, BucketConfig, Nodes, Snapshot) ->
     case ns_bucket:bucket_type(BucketConfig) of
         membase ->
-            case proplists:get_value(map, BucketConfig) of
+            case vbucket_map:get(BucketName, Snapshot, undefined) of
                 undefined ->
                     true;
                 Map ->

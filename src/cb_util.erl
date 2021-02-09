@@ -27,8 +27,10 @@ vbucket_from_id(Bucket, Id) when is_binary(Bucket) ->
     vbucket_from_id(binary_to_list(Bucket), Id);
 
 vbucket_from_id(Bucket, Id) ->
-    {ok, Config} = ns_bucket:get_bucket(Bucket),
-    Map = proplists:get_value(map, Config, []),
+    Snapshot = chronicle_compat:get_snapshot([ns_bucket:key_filter(Bucket),
+                                              vbucket_map:key_filter(Bucket)]),
+    {ok, Config} = ns_bucket:get_bucket(Bucket, Snapshot),
+    Map = vbucket_map:get_with_default(Bucket, Snapshot),
     NumVBuckets = proplists:get_value(num_vbuckets, Config, []),
     vbucket_from_id(Map, NumVBuckets, Id).
 

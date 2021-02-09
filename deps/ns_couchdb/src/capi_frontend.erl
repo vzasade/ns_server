@@ -381,8 +381,7 @@ couch_doc_open(Db, DocId, Options) ->
 %% Grab the first vbucket we can find on this server
 -spec first_vbucket(binary()) -> non_neg_integer().
 first_vbucket(Bucket) ->
-    {ok, Config} = ns_bucket:get_bucket(?b2l(Bucket)),
-    Map = proplists:get_value(map, Config, []),
+    Map = vbucket_map:get_with_default(?b2l(Bucket)),
     {ok, Index} = first_vbucket(ns_node_disco:ns_server_node(), Map, 0),
     Index.
 
@@ -397,9 +396,9 @@ first_vbucket(Node, [_First|Rest], I) ->
     first_vbucket(Node, Rest, I + 1).
 
 has_active_vbuckets(Bucket) ->
-    {ok, Config} = ns_bucket:get_bucket(?b2l(Bucket)),
-    Map = proplists:get_value(map, Config, []),
-    first_vbucket(ns_node_disco:ns_server_node(), Map, 0) =/= {error, no_vbucket_found}.
+    Map = vbucket_map:get_with_default(?b2l(Bucket)),
+    first_vbucket(ns_node_disco:ns_server_node(), Map, 0)
+        =/= {error, no_vbucket_found}.
 
 -spec get_version() -> string().
 get_version() ->
